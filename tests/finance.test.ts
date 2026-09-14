@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {calculateSale,summarizeSales} from '../lib/finance.ts';
+import {calculateSale,summarizeSales,groupProducts} from '../lib/finance.ts';
 import type {Sale,CostRecord} from '../lib/finance.ts';
 const sale:Sale={id:'s',orderId:'o',accountId:'a',sku:'001',title:'Produto',date:'2026-09-10',quantity:2,costQuantity:2,revenueCents:20000,feeCents:3000,shippingCents:1000,otherCents:0,status:'paid'};
 const cost:CostRecord={id:'c',accountId:'a',sku:'001',description:'Produto',unitCost:50,taxValue:5,taxType:'unit',taxTreatment:'included',validFrom:'2026-09-01',importedAt:'2026-09-11T00:00:00Z',importId:'i'};
@@ -16,3 +16,8 @@ test('mesma vigência respeita última revisão importada',()=>assert.equal(calc
 test('arredonda custo depois de multiplicar unidades',()=>assert.equal(calculateSale({...sale,quantity:3,costQuantity:3},[{...cost,unitCost:10.3333}]).costCents,3100));
 test('cobertura informa receita sem custo e margem não é média simples',()=>{const r=summarizeSales([sale,{...sale,id:'x',orderId:'y',sku:'unknown',revenueCents:10000}],[cost]);assert.equal(r.revenueCents,30000);assert.equal(r.coveredRevenueCents,20000);assert.equal(r.contributionCents,6000);assert.equal(r.margin,30);assert.equal(r.orders,2)});
 test('reembolso sem recuperação do estoque preserva custo consumido',()=>assert.equal(calculateSale({...sale,status:'refunded',revenueCents:0,feeCents:0,shippingCents:1000},[cost]).contributionCents,-11000));
+test('SKU igual em contas diferentes não une produtos automaticamente',()=>{
+ const rows=[calculateSale(sale,[cost]),calculateSale({...sale,accountId:'other',title:'Outro produto'},[])];
+ const products=groupProducts(rows);assert.equal(products.length,2);assert.equal(products[0].profit,6000);assert.equal(products[1].complete,false);
+});
+test('pedidos iguais de contas diferentes são contados separadamente',()=>assert.equal(summarizeSales([sale,{...sale,accountId:'other'}],[cost]).orders,2));

@@ -18,7 +18,17 @@ export function summarizeSales(sales:Sale[],costs:CostRecord[]) {
   const covered=rows.filter(r=>r.contributionCents!==null);
   const coveredRevenueCents=covered.reduce((s,r)=>s+r.revenueCents,0);
   const contributionCents=covered.reduce((s,r)=>s+(r.contributionCents??0),0);
-  return {revenueCents,contributionCents,coveredRevenueCents,coverage:revenueCents>0?coveredRevenueCents/revenueCents*100:0,margin:coveredRevenueCents>0?contributionCents/coveredRevenueCents*100:null,orders:new Set(rows.map(s=>s.orderId)).size,rows};
+  return {revenueCents,contributionCents,coveredRevenueCents,coverage:revenueCents>0?coveredRevenueCents/revenueCents*100:0,margin:coveredRevenueCents>0?contributionCents/coveredRevenueCents*100:null,orders:new Set(rows.map(s=>s.accountId+'\0'+s.orderId)).size,rows};
+}
+export function groupProducts(rows:SaleResult[]){
+ const products=new Map<string,{sku:string;account:string;title:string;units:number;revenue:number;profit:number;complete:boolean}>();
+ for(const row of rows){
+  const key=row.accountId+'\0'+row.sku;
+  const product=products.get(key)??{sku:row.sku,account:row.accountId,title:row.title,units:0,revenue:0,profit:0,complete:true};
+  product.units+=row.quantity;product.revenue+=row.revenueCents;product.profit+=row.contributionCents??0;product.complete&&=row.contributionCents!==null;
+  products.set(key,product);
+ }
+ return [...products.values()];
 }
 export const money=(cents:number|null)=>cents===null?'—':new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(cents/100);
 export const percent=(value:number|null)=>value===null?'—':`${value.toLocaleString('pt-BR',{maximumFractionDigits:1})}%`;
