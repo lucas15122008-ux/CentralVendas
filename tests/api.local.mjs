@@ -17,9 +17,14 @@ test('API privada: persistência, isolamento, idempotência e histórico',async 
   assert.equal((await fetch(base+'/api/workspace')).status,401);
   assert.equal((await fetch(base+'/api/workspace',{headers:{'oai-authenticated-user-id':'local_seedy','oai-authenticated-user-email':'fake@example.test'}})).status,401);
  });
- await t.test('origem externa ou ausente não cria conta',async()=>{
+ await t.test('origem diferente ou ausente não cria conta',async()=>{
   const body=JSON.stringify({name:'Não criar'});
-  assert.equal((await call('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://foreign.example'},body})).status,403);
+  // Vite allows localhost through its development CORS middleware, so this
+  // mismatch reaches our API's origin check instead of testing Vite's early
+  // rejection (which can leave an unread body on its keep-alive connection).
+  const denied=await call('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:5173'},body});
+  assert.equal(denied.status,403);
+  assert.equal((await denied.json()).error,'Origem da solicitação inválida.');
   assert.equal((await fetch(base+'/api/accounts',{method:'POST',headers:{Cookie:auth.Cookie,'Content-Type':'application/json'},body})).status,403);
  });
  await t.test('cria conta de trabalho e persiste lote com precisão',async()=>{
