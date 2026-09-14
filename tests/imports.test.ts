@@ -1,0 +1,12 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';
+import {parseDecimal,normalizeRows} from '../lib/imports.ts';
+const mapping={sku:0,description:1,cost:2,tax:3};
+const options={accountId:'a',validFrom:'2026-09-01',taxType:'unit' as const,taxTreatment:'included' as const};
+test('moeda brasileira e casas unitárias',()=>{assert.equal(parseDecimal('R$ 1.234,5678'),1234.5678);assert.equal(parseDecimal(12.3456),12.3456);assert.equal(parseDecimal('6%'),6)});
+test('campos vazios, lixo e valores não finitos não viram zero',()=>{for(const value of ['',null,'abc','10 reais','NaN',Infinity])assert.equal(parseDecimal(value),null)});
+test('SKU textual preserva zeros',()=>{const r=normalizeRows([['001','Produto','50,00','5,00']],mapping,options);assert.equal(r.records[0]?.sku,'001');assert.equal(r.records[0]?.unitCost,50);assert.equal(r.issues.length,0)});
+test('duplicidade no lote é erro explícito',()=>assert.equal(normalizeRows([['001','A',20,0],['001','A',30,0]],mapping,options).issues.length,1));
+test('custo negativo não é aceito',()=>assert.equal(normalizeRows([['001','A',-20,0]],mapping,options).issues.length,1));
+test('imposto vazio continua desconhecido',()=>assert.equal(normalizeRows([['001','A',20,'']],mapping,options).records[0]?.taxValue,null));
+test('percentual acima de cem é recusado',()=>assert.equal(normalizeRows([['001','A',20,120]],mapping,{...options,taxType:'percent'}).issues.length,1));
+test('linha vazia é ignorada e linha sem SKU é rejeitada',()=>{const r=normalizeRows([['','','',''],['','A',20,0]],mapping,options);assert.equal(r.issues.length,1);assert.equal(r.records.length,0)});
