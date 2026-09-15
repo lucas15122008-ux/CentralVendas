@@ -13,7 +13,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "test": "node --test tests/*.test.ts",
-    "test:api:local": "node --test tests/api.local.mjs"
+    "test:api:local": "node --test tests/api.local.mjs",
+    "test:worker:local": "node --test tests/meli-worker.local.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

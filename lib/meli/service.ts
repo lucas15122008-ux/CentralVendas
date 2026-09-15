@@ -13,7 +13,8 @@ type Fetcher=(url:string,init?:RequestInit)=>Promise<Response>;
 const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 export class MeliService {
  db:D1Database;key:string;fetcher:Fetcher;now:()=>number;
- constructor(db:D1Database,key:string,fetcher:Fetcher=fetch,now:()=>number=Date.now){this.db=db;this.key=key;this.fetcher=fetcher;this.now=now;}
+ // Calling native Worker fetch as this.fetcher changes its receiver and throws Illegal invocation.
+ constructor(db:D1Database,key:string,fetcher:Fetcher=(url,init)=>fetch(url,init),now:()=>number=Date.now){this.db=db;this.key=key;this.fetcher=fetcher;this.now=now;}
  async account(owner:string,id:string){const row=await this.db.prepare('SELECT id FROM accounts WHERE id=? AND owner_id=?').bind(id,owner).first();if(!row)throw new MeliError(404,'Conta não encontrada.');}
  async app(owner:string){if(!this.key)throw new MeliError(503,'A proteção da conexão ainda não foi configurada.');const app=await this.db.prepare('SELECT * FROM meli_apps WHERE owner_id=?').bind(owner).first<App>();if(!app)throw new MeliError(409,'Configure sua aplicação antes de conectar.');return app;}
  async connection(owner:string,id:string){await this.account(owner,id);const row=await this.db.prepare('SELECT * FROM meli_connections WHERE owner_id=? AND account_id=?').bind(owner,id).first<Connection>();if(!row)throw new MeliError(409,'Autorize esta conta no Mercado Livre.');return row;}
@@ -41,9 +42,10 @@ export class MeliService {
   return {url:authorizationUrl({clientId:app.client_id,redirectUri:CALLBACK_URL,pkce:!!app.pkce},state,await pkceChallenge(verifier)),state,browser};
  }
  async remote(path:string,token?:string,body?:URLSearchParams){
-  // Host and resource paths are constructed only by this module. Never follow a redirect with credentials.
+  // Workers supports manual/follow only. Manual redirects reach the non-2xx rejection below;
+  // credentials are never forwarded to the Location target.
   let response:Response;
-  try{response=await this.fetcher('https://api.mercadolibre.com'+path,{method:body?'POST':'GET',redirect:'error',signal:AbortSignal.timeout(12000),headers:{Accept:'application/json','x-format-new':'true',...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:body.toString()}:{})});}catch{throw new MeliError(502,'O Mercado Livre não respondeu. Tente retomar a atualização.');}
+  try{response=await this.fetcher('https://api.mercadolibre.com'+path,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Accept:'application/json','x-format-new':'true',...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:body.toString()}:{})});}catch{throw new MeliError(502,'O Mercado Livre não respondeu. Tente retomar a atualização.');}
   if(!response.ok){const status=response.status;await response.body?.cancel();throw new MeliError(status===401?401:status===403?403:status===404?404:status===429?429:502,status===401?'A autorização expirou. Reconecte esta conta.':status===403?'A aplicação não tem acesso a este recurso. Confira as permissões no Mercado Livre.':status===429?'O Mercado Livre pediu uma pausa. Retome a atualização em alguns minutos.':'Não foi possível consultar este recurso no Mercado Livre.');}
   try{return await response.json() as unknown}catch{throw new MeliError(502,'O Mercado Livre retornou dados incompletos. Tente novamente.');}
  }
