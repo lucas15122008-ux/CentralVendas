@@ -2,7 +2,7 @@ import {periodStart} from './dates.ts';
 import type {CostRecord,Sale} from './finance.ts';
 export type Account={id:string;name:string;createdAt?:string};
 export type ImportBatch={id:string;accountId:string;filename:string;validFrom:string;rowCount:number;createdAt:string;withdrawnAt:string|null;config:string};
-export type Workspace={accounts:Account[];imports:ImportBatch[];costs:CostRecord[];sales:Sale[]};
+export type Workspace={accounts:Account[];imports:ImportBatch[];costs:CostRecord[];sales:Sale[];syncWarnings?:{accountId:string;name:string;status:string}[]};
 export const emptyWorkspace:Workspace={accounts:[],imports:[],costs:[],sales:[]};
 export function demoWorkspace():Workspace{
  const accounts=[{id:'demo-main',name:'Loja Principal'},{id:'demo-outlet',name:'Loja Outlet'}];

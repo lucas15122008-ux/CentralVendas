@@ -1,0 +1,3 @@
+import {owner} from '@/lib/server';import {meli,meliError,input,accountId} from '@/lib/meli/server';
+import {browserCookie} from '@/lib/meli/protocol';
+export async function POST(request:Request){try{const id=await owner(request);const body=await input(request);const flow=await meli().connect(id,accountId(body.accountId));return Response.json({url:flow.url},{headers:{'Cache-Control':'no-store','Set-Cookie':`${browserCookie(flow.state)}=${flow.browser}; Path=/api/meli/callback; HttpOnly; SameSite=Lax; Max-Age=600${new URL(request.url).protocol==='https:'?'; Secure':''}`}})}catch(e){return meliError(e)}}

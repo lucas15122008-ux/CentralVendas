@@ -63,3 +63,32 @@ test('API privada: persistência, isolamento, idempotência e histórico',async 
   assert.equal((await upload(csv.replace('10,3333','11,4444'))).status,409);
  });
 });
+test('Mercado Livre: rotas privadas, configuração segura e cancelamento OAuth',async t=>{
+ let account;
+ const post=(path,body,headers={})=>call('/api/meli/'+path,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
+ await t.test('status exige login e alterações exigem mesma origem',async()=>{
+  assert.equal((await fetch(base+'/api/meli/status')).status,401);
+  const denied=await post('settings',{clientId:'123',clientSecret:'local-test-secret',pkce:true},{Origin:'http://localhost:5173'});assert.equal(denied.status,403);
+ });
+ await t.test('salva configuração sem devolver segredo',async()=>{
+  const existing=await workspace();const connections=await (await call('/api/meli/status')).json();for(const c of connections.connections){if(c.status==='authorizing'&&existing.accounts.some(a=>a.id===c.accountId&&a.name.startsWith('QA')))await post('disconnect',{accountId:c.accountId});}
+  const configured=await post('settings',{clientId:'123',clientSecret:'local-test-secret',pkce:true});assert.equal(configured.status,200);
+  const r=await call('/api/meli/status');assert.equal(r.status,200);const data=await r.json();assert.equal(data.app.configured,true);assert.equal(data.app.secureReady,true);assert.ok(!JSON.stringify(data).includes('local-test-secret'));
+  const created=await call('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'QA conexão '+crypto.randomUUID().slice(0,6)})});account=(await created.json()).id;
+ });
+ await t.test('contas de outro dono não podem conectar, desconectar ou sincronizar',async()=>{for(const route of ['connect','disconnect','sync'])assert.equal((await post(route,{accountId:foreignAccount})).status,404)});
+ await t.test('state usa cookie privado e recusa retorno sem vínculo',async()=>{
+  const connected=await post('connect',{accountId:account});assert.equal(connected.status,200);const cookie=connected.headers.get('set-cookie');assert.match(cookie,/HttpOnly/);assert.match(cookie,/SameSite=Lax/);const url=new URL((await connected.json()).url);assert.equal(url.origin,'https://auth.mercadolivre.com.br');assert.ok(url.searchParams.get('code_challenge'));
+  const bad=await call('/api/meli/callback?state='+url.searchParams.get('state')+'&error=access_denied',{redirect:'manual'});assert.equal(bad.status,303);assert.equal(new URL(bad.headers.get('location')).searchParams.get('meli'),'error');
+  const cancelled=await call('/api/meli/callback?state='+url.searchParams.get('state')+'&error=access_denied',{redirect:'manual',headers:{Cookie:auth.Cookie+'; '+cookie.split(';')[0]}});assert.equal(cancelled.status,303);assert.match(new URL(cancelled.headers.get('location')).searchParams.get('message'),/cancelada/);
+  assert.equal((await post('disconnect',{accountId:account})).status,200);
+  assert.equal((await post('sync',{accountId:account})).status,409);
+  const data=await workspace();assert.ok(data.accounts.some(a=>a.id===account));
+ });
+});
+test('duas autorizações simultâneas mantêm o vínculo de cada aba',async()=>{
+ const cookies=[];const flows=[];
+ for(let i=0;i<2;i++){const r=await call('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'QA duas abas '+crypto.randomUUID().slice(0,6)})});const id=(await r.json()).id;const flow=await call('/api/meli/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountId:id})});assert.equal(flow.status,200);cookies.push(flow.headers.get('set-cookie').split(';')[0]);flows.push({id,state:new URL((await flow.json()).url).searchParams.get('state')})}
+ const jar=new Map(cookies.map(c=>[c.split('=')[0],c]));
+ for(const f of flows){const r=await call('/api/meli/callback?state='+f.state+'&error=access_denied',{redirect:'manual',headers:{Cookie:auth.Cookie+'; '+[...jar.values()].join('; ')}});assert.match(new URL(r.headers.get('location')).searchParams.get('message'),/cancelada/);jar.delete(r.headers.get('set-cookie').split('=')[0]);await call('/api/meli/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountId:f.id})});}
+});

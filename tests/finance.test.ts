@@ -21,3 +21,4 @@ test('SKU igual em contas diferentes não une produtos automaticamente',()=>{
  const products=groupProducts(rows);assert.equal(products.length,2);assert.equal(products[0].profit,6000);assert.equal(products[1].complete,false);
 });
 test('pedidos iguais de contas diferentes são contados separadamente',()=>assert.equal(summarizeSales([sale,{...sale,accountId:'other'}],[cost]).orders,2));
+test('valores desconhecidos do Mercado Livre impedem margem sem virar zero',()=>{const s:Sale={id:'ml',orderId:'1',accountId:'a',sku:'SKU',title:'Produto',date:'2026-09-01',quantity:1,costQuantity:1,revenueCents:null,feeCents:null,shippingCents:null,otherCents:0,status:'paid'};const result=calculateSale(s,[]);assert.equal(result.contributionCents,null);assert.ok(result.reasons.length>=4);assert.equal(summarizeSales([s],[]).unknownRevenue,1);});
