@@ -123,7 +123,8 @@ export class MeliService {
   const get=async(path:string)=>{if(this.now()>now+60000)throw new MeliError(503,'O lote demorou além do esperado. Retome para tentar novamente.');return this.remote(path,token)};
   try{
    if(run.offset>=10000)throw new MeliError(409,'O limite de 10.000 pedidos desta atualização foi atingido. Os dados estão parciais; é necessário ampliar a sincronização por períodos.');
-   const query=new URLSearchParams({seller:c.seller_id,sort:'date_asc','order.status':'paid,cancelled,partially_refunded,pending_cancel,confirmed,payment_required,payment_in_process,partially_paid',limit:'5',offset:String(run.offset),'order.date_created.from':run.from_date,'order.date_created.to':run.to_date});
+   // Seller and dates scope the search; no status allowlist can omit cancellations or send unsupported filters.
+   const query=new URLSearchParams({seller:c.seller_id,sort:'date_asc',limit:'5',offset:String(run.offset),'order.date_created.from':run.from_date,'order.date_created.to':run.to_date});
    const search=z.object({results:z.array(orderSchema).max(5),paging:z.object({total:z.number().int().nonnegative(),offset:z.number().int().nonnegative()})}).safeParse(await get('/orders/search?'+query));
    if(!search.success||search.data.paging.offset!==run.offset)throw new MeliError(502,'O Mercado Livre retornou um lote incompleto. Retome a atualização.');
    if(!search.data.results.length&&run.offset<search.data.paging.total)throw new MeliError(502,'A lista de pedidos mudou durante a leitura. Tente retomar.');
