@@ -48,12 +48,11 @@ export class MeliService {
   try{response=await this.fetcher('https://api.mercadolibre.com'+path,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Accept:'application/json','x-format-new':'true',...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:body.toString()}:{})});}catch{throw new MeliError(502,'O Mercado Livre não respondeu. Tente retomar a atualização.');}
   if(!response.ok){
    const status=response.status;
-   const sensitive=[token,...['client_secret','code','refresh_token','access_token'].map(key=>body?.get(key))].filter((s):s is string=>!!s);
-   const clean=(value:unknown)=>{if(typeof value!=='string')return undefined;for(const secret of sensitive)value=(value as string).split(secret).join('[redacted]').split(encodeURIComponent(secret)).join('[redacted]');return (value as string).replace(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/gi,'[redacted]').replace(/[\r\n\t]/g,' ').slice(0,500);};
-   // Only allow diagnostic fields. Never log headers, query parameters or response payloads.
+   // Free-form errors can echo credentials or query values. Log only known error identifiers.
+   const knownCodes=new Set(['bad_request','invalid_limit','invalid_token','invalid_grant','invalid_client','invalid_request','unauthorized','forbidden','not_found','discount_not_found','too_many_requests','internal_server_error']);
    let detail:Record<string,unknown>={};
    try{const data=await response.json();if(data&&typeof data==='object'&&!Array.isArray(data))detail=data as Record<string,unknown>;}catch{/* Non-JSON responses are identified by resource and status only. */}
-   console.error('meli_upstream_error',{resource:path.split('?')[0].replace(/\/\d+(?=\/|$)/g,'/:id'),status,code:clean(detail.error),message:clean(detail.message)});
+   console.error('meli_upstream_error',{resource:path.split('?')[0].replace(/\/\d+(?=\/|$)/g,'/:id'),status,code:typeof detail.error==='string'&&knownCodes.has(detail.error)?detail.error:'unrecognized_error'});
    throw new MeliError(status===401?401:status===403?403:status===404?404:status===429?429:502,status===401?'A autorização expirou. Reconecte esta conta.':status===403?'A aplicação não tem acesso a este recurso. Confira as permissões no Mercado Livre.':status===429?'O Mercado Livre pediu uma pausa. Retome a atualização em alguns minutos.':'Não foi possível consultar este recurso no Mercado Livre.');
   }
   try{return await response.json() as unknown}catch{throw new MeliError(502,'O Mercado Livre retornou dados incompletos. Tente novamente.');}

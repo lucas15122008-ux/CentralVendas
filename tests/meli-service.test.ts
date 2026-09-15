@@ -55,3 +55,9 @@ test('busca do vendedor não envia status inválidos e preserva cancelamentos',a
  const saved=x.sqlite.prepare('SELECT data FROM meli_orders ORDER BY order_id').all().map(r=>JSON.parse(String(r.data))[0]);
  assert.deepEqual(saved.map(r=>r.status),['paid','refunded']);assert.equal(saved[1].revenueCents,null);
 });
+test('diagnóstico não registra mensagens livres ou códigos que possam repetir dados privados',async()=>{
+ const x=setup();const logs:unknown[][]=[];const original=console.error;console.error=(...args)=>logs.push(args);
+ x.setHandler(async()=>Response.json({error:'private-verifier',message:'private-verifier seller=123 from=2026-08-16'},{status:400}));
+ try{await assert.rejects(x.service.remote('/oauth/token',undefined,new URLSearchParams({code_verifier:'private-verifier'})));}finally{console.error=original;}
+ assert.equal(logs.length,1);assert.deepEqual(logs[0][1],{resource:'/oauth/token',status:400,code:'unrecognized_error'});
+});
