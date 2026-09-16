@@ -93,3 +93,11 @@ Interface: status de automação inclui configurada, último contato, último ev
 - [ ] Cadastrar URL de notificações e tópicos autorizados da aplicação Mercado Livre.
 - [ ] Demonstrar evento recebido, processamento com aba fechada, retomada de falha e atualização visível no painel.
 - [ ] Atualizar guia e estado de implantação. Se a infraestrutura não estiver disponível, registrar precisamente o que foi preparado e o que ainda impede a ativação.
+
+## Estado verificado em 16/09/2026
+
+Tarefas 1–3 implementadas: busca incremental com cursor e retomada persistida; fila D1 com deduplicação por revisão, trava por conta e geração; venda provisória seguida de enriquecimento; ponte HMAC com nonce e limites; Worker com filas e recuperação periódica. A tarefa 4 está implementada, com polling visível sem sobreposição e estado separado de último contato e último aviso; validação do painel publicado pendente.
+
+Validações: 88 testes de unidade/serviço, 14 testes da API local, quatro testes no runtime Worker, TypeScript e build concluídos. Revisão independente encontrou e levou à correção de janela com sobreposição, persistência da continuação, reagendamento de aviso novo durante falha antiga e exibição do último evento por proprietário.
+
+Cloudflare autorizada pelo usuário; duas filas criadas. Tarefa 5 em andamento: concluir endereço workers.dev, publicar Site com migrações, configurar segredos da ponte, cadastrar notificações na aplicação existente e verificar processamento real. Nenhuma alteração na audiência ou na chave de criptografia Mercado Livre. Não considerar ativação concluída com base somente nos testes locais.

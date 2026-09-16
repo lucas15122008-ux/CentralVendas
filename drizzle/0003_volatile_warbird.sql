@@ -1,0 +1,1 @@
+ALTER TABLE `meli_sync_runs` ADD `needs_more` integer DEFAULT 0 NOT NULL;

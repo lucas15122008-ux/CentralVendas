@@ -1,6 +1,6 @@
 # Atualização automática das vendas
 
-Desenho funcional aprovado pelo usuário em 16/09/2026. O usuário confirmou que os custos da planilha são atuais e não devem ser aplicados retroativamente. A conta Cloudflare ainda precisa ser criada pelo usuário.
+Desenho funcional aprovado pelo usuário em 16/09/2026. O usuário confirmou que os custos da planilha são atuais e não devem ser aplicados retroativamente. A conta Cloudflare foi criada e o usuário concluiu a autorização oficial do Wrangler em 16/09/2026.
 
 ## Resultado esperado
 

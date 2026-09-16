@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {accountLease,type WriteGuard} from './lease.ts';
 import {randomToken,seal,unseal,pkceChallenge} from './crypto.ts';
 import {authorizationUrl,remoteId,orderSchema,normalizeOrders,type MeliOrder,type ShipmentCost} from './protocol.ts';
 export const CALLBACK_URL='https://central-vendas-lucas.kisashi.chatgpt.site/api/meli/callback';
@@ -6,9 +7,9 @@ export class MeliError extends Error {status:number;constructor(status:number,me
 const configSchema=z.object({clientId:z.string().trim().regex(/^\d{3,30}$/),clientSecret:z.string().trim().min(8).max(500),pkce:z.boolean()});
 const tokenSchema=z.object({access_token:z.string().min(1).max(10000),refresh_token:z.string().min(1).max(10000),expires_in:z.number().int().positive().max(86400*365),user_id:remoteId});
 type App={owner_id:string;client_id:string;secret:string;pkce:number;revision:string};
-type Connection={account_id:string;owner_id:string;seller_id:string|null;nickname:string|null;status:string;generation:string;tokens:string|null;expires_at:number|null;refresh_started:number|null};
+type Connection={account_id:string;owner_id:string;seller_id:string|null;nickname:string|null;status:string;generation:string;tokens:string|null;expires_at:number|null;refresh_started:number|null;sync_cursor:string|null};
 type Flow={account_id:string;generation:string;app_revision:string;verifier:string};
-type Run={id:string;account_id:string;owner_id:string;generation:string;from_date:string;to_date:string;offset:number;total:number|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
+type Run={id:string;account_id:string;owner_id:string;generation:string;mode:'history'|'incremental';from_date:string;to_date:string;offset:number;total:number|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
 type Fetcher=(url:string,init?:RequestInit)=>Promise<Response>;
 const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 export class MeliService {
@@ -18,10 +19,15 @@ export class MeliService {
  async account(owner:string,id:string){const row=await this.db.prepare('SELECT id FROM accounts WHERE id=? AND owner_id=?').bind(id,owner).first();if(!row)throw new MeliError(404,'Conta não encontrada.');}
  async app(owner:string){if(!this.key)throw new MeliError(503,'A proteção da conexão ainda não foi configurada.');const app=await this.db.prepare('SELECT * FROM meli_apps WHERE owner_id=?').bind(owner).first<App>();if(!app)throw new MeliError(409,'Configure sua aplicação antes de conectar.');return app;}
  async connection(owner:string,id:string){await this.account(owner,id);const row=await this.db.prepare('SELECT * FROM meli_connections WHERE owner_id=? AND account_id=?').bind(owner,id).first<Connection>();if(!row)throw new MeliError(409,'Autorize esta conta no Mercado Livre.');return row;}
- async status(owner:string){
+ async status(owner:string,automationConfigured=false){
   const app=await this.db.prepare('SELECT client_id,pkce FROM meli_apps WHERE owner_id=?').bind(owner).first<{client_id:string;pkce:number}>();
-  const connections=await this.db.prepare('SELECT c.account_id AS accountId,c.seller_id AS sellerId,c.nickname,c.status,c.updated_at AS updatedAt,c.synced_at AS syncedAt,r.status AS syncStatus,r.offset AS processed,r.total,r.error,r.from_date AS fromDate,r.to_date AS toDate FROM meli_connections c LEFT JOIN meli_sync_runs r ON r.account_id=c.account_id AND r.owner_id=c.owner_id AND r.generation=c.generation WHERE c.owner_id=?').bind(owner).all<{accountId:string;sellerId:string|null;nickname:string|null;status:string;updatedAt:number;syncedAt:number|null;syncStatus:string|null;processed:number|null;total:number|null;error:string|null;fromDate:string|null;toDate:string|null}>();
-  return {app:{configured:!!app,secureReady:!!this.key,clientId:app?.client_id??'',pkce:!!app?.pkce,callbackUrl:CALLBACK_URL},connections:connections.results};
+  const connections=await this.db.prepare('SELECT c.account_id AS accountId,c.seller_id AS sellerId,c.nickname,c.status,c.updated_at AS updatedAt,c.synced_at AS syncedAt,r.status AS syncStatus,r.mode AS syncMode,r.needs_more AS needsMore,r.offset AS processed,r.total,r.error,r.from_date AS fromDate,r.to_date AS toDate FROM meli_connections c LEFT JOIN meli_sync_runs r ON r.account_id=c.account_id AND r.owner_id=c.owner_id AND r.generation=c.generation WHERE c.owner_id=?').bind(owner).all<{accountId:string;sellerId:string|null;nickname:string|null;status:string;updatedAt:number;syncedAt:number|null;syncStatus:string|null;syncMode:'history'|'incremental'|null;needsMore:number|null;processed:number|null;total:number|null;error:string|null;fromDate:string|null;toDate:string|null}>();
+  const health=await this.db.prepare("SELECT heartbeat_at FROM meli_automation_health WHERE id='bridge'").first<{heartbeat_at:number}>();
+  const queue=await this.db.prepare('SELECT COUNT(*) AS pending,MIN(error) AS error FROM meli_jobs WHERE owner_id=?').bind(owner).first<{pending:number;error:string|null}>();
+  const event=await this.db.prepare('SELECT event_at FROM meli_automation_health WHERE id=?').bind('events:'+owner).first<{event_at:number}>();
+  const heartbeatAt=health?.heartbeat_at??null;
+  const automation={state:!automationConfigured||!heartbeatAt?'pending':this.now()-heartbeatAt>180000?'lagging':queue?.error?'retrying':'active',heartbeatAt,lastEventAt:event?.event_at??null,pending:queue?.pending??0,error:queue?.error??null};
+  return {automation,app:{configured:!!app,secureReady:!!this.key,clientId:app?.client_id??'',pkce:!!app?.pkce,callbackUrl:CALLBACK_URL},connections:connections.results.map(c=>({...c,needsMore:!!c.needsMore}))};
  }
  async configure(owner:string,input:unknown){
   if(!this.key)throw new MeliError(503,'A proteção da conexão ainda não foi configurada.');
@@ -35,7 +41,7 @@ export class MeliService {
   const encrypted=await seal(verifier,this.key,owner+'/state/'+stateHash);
   const results=await this.db.batch([
    this.db.prepare('DELETE FROM meli_oauth_states WHERE expires_at<? OR (owner_id=? AND account_id=?)').bind(this.now(),owner,id),
-   this.db.prepare("INSERT INTO meli_connections(account_id,owner_id,status,generation,updated_at) SELECT ?,?,'authorizing',?,? WHERE EXISTS(SELECT 1 FROM meli_apps WHERE owner_id=? AND revision=?) ON CONFLICT(account_id) DO UPDATE SET status='authorizing',generation=excluded.generation,tokens=NULL,expires_at=NULL,refresh_started=NULL,updated_at=excluded.updated_at RETURNING account_id").bind(id,owner,generation,this.now(),owner,app.revision),
+   this.db.prepare("INSERT INTO meli_connections(account_id,owner_id,status,generation,updated_at) SELECT ?,?,'authorizing',?,? WHERE EXISTS(SELECT 1 FROM meli_apps WHERE owner_id=? AND revision=?) ON CONFLICT(account_id) DO UPDATE SET status='authorizing',generation=excluded.generation,tokens=NULL,expires_at=NULL,refresh_started=NULL,sync_cursor=NULL,updated_at=excluded.updated_at RETURNING account_id").bind(id,owner,generation,this.now(),owner,app.revision),
    this.db.prepare('INSERT INTO meli_oauth_states(state_hash,owner_id,account_id,browser_hash,verifier,generation,app_revision,expires_at) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM meli_connections WHERE account_id=? AND owner_id=? AND generation=?)').bind(stateHash,owner,id,await hash(browser),encrypted,generation,app.revision,this.now()+600000,id,owner,generation)
   ]);
   if(!results[1].results.length)throw new MeliError(409,'A configuração mudou. Inicie a conexão novamente.');
@@ -109,40 +115,22 @@ export class MeliService {
    if(!saved)throw new MeliError(409,'A conexão foi cancelada durante a renovação.');return next.access_token;
   }catch(error){await this.db.prepare("UPDATE meli_connections SET status='reconnect',tokens=NULL,updated_at=? WHERE owner_id=? AND account_id=? AND generation=? AND tokens=? AND status='refreshing'").bind(this.now(),owner,id,c.generation,c.tokens).run();throw error;}
  }
- async sync(owner:string,id:string){
-  const token=await this.accessToken(owner,id);const c=await this.connection(owner,id);if(!c.seller_id)throw new MeliError(409,'Autorize o vendedor.');
-  const now=this.now(),runId=randomToken(),lease=randomToken();
-  // Fixed 30-day window includes the current hour; repeated updates reconcile the full window.
-  const from=new Date(now-30*86400000);from.setUTCMinutes(0,0,0);const to=new Date(now+3600000);to.setUTCMinutes(0,0,0);
-  await this.db.prepare("INSERT INTO meli_sync_runs(account_id,owner_id,generation,id,from_date,to_date,offset,status,updated_at) VALUES(?,?,?,?,?,?,0,'running',?) ON CONFLICT(account_id) DO UPDATE SET generation=excluded.generation,id=excluded.id,from_date=excluded.from_date,to_date=excluded.to_date,offset=0,total=NULL,status='running',lease=NULL,lease_until=NULL,error=NULL,updated_at=excluded.updated_at WHERE meli_sync_runs.status='complete' OR meli_sync_runs.generation<>excluded.generation").bind(id,owner,c.generation,runId,from.toISOString(),to.toISOString(),now).run();
-  const run=await this.db.prepare("UPDATE meli_sync_runs SET lease=?,lease_until=?,status='running',error=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND generation=? AND (lease_until IS NULL OR lease_until<?) RETURNING *").bind(lease,now+90000,now,id,owner,c.generation,now).first<Run>();
-  if(!run)throw new MeliError(409,'Esta conta já está atualizando em outra aba. Aguarde a conclusão do lote.');
-  const guard="EXISTS(SELECT 1 FROM meli_sync_runs r JOIN meli_connections c ON c.account_id=r.account_id AND c.owner_id=r.owner_id WHERE r.account_id=? AND r.owner_id=? AND r.id=? AND r.lease=? AND r.generation=c.generation AND c.status='connected' AND r.lease_until>?)";
-  const guardValues=()=>[id,owner,run.id,lease,this.now()];
-  const get=async(path:string)=>{if(this.now()>now+60000)throw new MeliError(503,'O lote demorou além do esperado. Retome para tentar novamente.');return this.remote(path,token)};
-  try{
-   if(run.offset>=10000)throw new MeliError(409,'O limite de 10.000 pedidos desta atualização foi atingido. Os dados estão parciais; é necessário ampliar a sincronização por períodos.');
-   // Seller and dates scope the search; no status allowlist can omit cancellations or send unsupported filters.
-   const query=new URLSearchParams({seller:c.seller_id,sort:'date_asc',limit:'5',offset:String(run.offset),'order.date_created.from':run.from_date,'order.date_created.to':run.to_date});
-   const search=z.object({results:z.array(orderSchema).max(5),paging:z.object({total:z.number().int().nonnegative(),offset:z.number().int().nonnegative()})}).safeParse(await get('/orders/search?'+query));
-   if(!search.success||search.data.paging.offset!==run.offset)throw new MeliError(502,'O Mercado Livre retornou um lote incompleto. Retome a atualização.');
-   if(!search.data.results.length&&run.offset<search.data.paging.total)throw new MeliError(502,'A lista de pedidos mudou durante a leitura. Tente retomar.');
-   const orders=new Map<string,MeliOrder>();for(const order of search.data.results){if(order.seller.id!==c.seller_id)throw new MeliError(502,'Não foi possível confirmar o vendedor de um pedido.');orders.set(order.id,order);}
+ async enrich(id:string,seller:string,orders:Map<string,MeliOrder>,get:(path:string)=>Promise<unknown>){
    const shipments:ShipmentCost[]=[];
    for(const shipmentId of new Set([...orders.values()].map(o=>o.shipping?.id).filter((s):s is string=>!!s))){
     const shipment:ShipmentCost={id:shipmentId,sellerCostCents:null,orderIds:[],complete:false};shipments.push(shipment);
     try{
      const items=z.array(z.object({order_id:remoteId,sender_id:remoteId,item_id:z.string(),variation_id:remoteId.nullish(),quantity:z.number().positive()})).min(1).max(50).parse(await get('/shipments/'+shipmentId+'/items'));
-     if(items.some(i=>i.sender_id!==c.seller_id))continue;
+     if(items.some(i=>i.sender_id!==seller))continue;
      shipment.orderIds=[...new Set(items.map(i=>i.order_id))];
      if(shipment.orderIds.length>15||orders.size+shipment.orderIds.filter(orderId=>!orders.has(orderId)).length>20)continue;
-     for(const orderId of shipment.orderIds){if(!orders.has(orderId)){const extra=orderSchema.parse(await get('/orders/'+orderId));if(extra.id!==orderId||extra.seller.id!==c.seller_id||extra.shipping?.id!==shipmentId)throw new MeliError(502,'Os pedidos de um envio não puderam ser confirmados.');orders.set(extra.id,extra);}}
+     for(const orderId of shipment.orderIds){if(!orders.has(orderId)){const extra=orderSchema.parse(await get('/orders/'+orderId));if(extra.id!==orderId||extra.seller.id!==seller||extra.shipping?.id!==shipmentId)throw new MeliError(502,'Os pedidos de um envio não puderam ser confirmados.');orders.set(extra.id,extra);}}
      const expected=new Map<string,number>(),actual=new Map<string,number>();
      for(const orderId of shipment.orderIds)for(const line of orders.get(orderId)!.order_items){const key=JSON.stringify([orderId,line.item.id,line.item.variation_id??'0']);expected.set(key,(expected.get(key)??0)+line.quantity);}
      for(const item of items){const key=JSON.stringify([item.order_id,item.item_id,item.variation_id??'0']);actual.set(key,(actual.get(key)??0)+item.quantity);}
      if(expected.size!==actual.size||[...expected].some(([key,quantity])=>actual.get(key)!==quantity))continue;
      const costs=z.object({senders:z.array(z.object({user_id:remoteId,cost:z.number().finite().nonnegative().max(1e9)}))}).parse(await get('/shipments/'+shipmentId+'/costs'));
-     const sender=costs.senders.filter(s=>s.user_id===c.seller_id);if(sender.length===1)shipment.sellerCostCents=Math.round(sender[0].cost*100);shipment.complete=true;
+     const sender=costs.senders.filter(s=>s.user_id===seller);if(sender.length===1)shipment.sellerCostCents=Math.round(sender[0].cost*100);shipment.complete=true;
     }catch(error){if(error instanceof MeliError&&![403,404].includes(error.status))throw error;/* Unknown shipment data remains pending, never zero. */}
    }
    const discountState=new Map<string,'none'|'present'|'unknown'>();
@@ -150,7 +138,63 @@ export class MeliService {
     try{const details=z.object({details:z.array(z.unknown())}).safeParse(await get('/orders/'+order.id+'/discounts'));discountState.set(order.id,details.success?(details.data.details.length?'present':'none'):'unknown');}
     catch(error){if(error instanceof MeliError&&![403,404].includes(error.status))throw error;discountState.set(order.id,'unknown');}
    }
-   const rows=normalizeOrders(id,c.seller_id,[...orders.values()],shipments,discountState);
+   return normalizeOrders(id,seller,[...orders.values()],shipments,discountState);
+ }
+ async sync(owner:string,id:string,mode:'auto'|'history'='auto',expectedGeneration?:string){
+  const c=await this.connection(owner,id);
+  if(expectedGeneration&&c.generation!==expectedGeneration)throw new MeliError(409,'A conexão mudou.');
+  try{return await accountLease(this.db,owner,id,c.generation,this.now,guard=>this.syncBatch(owner,id,mode,guard));}
+  catch(error){if(error instanceof Error&&error.message==='account_busy')throw new MeliError(409,'Esta conta já está atualizando. Aguarde a conclusão do lote.');throw error;}
+ }
+ async saveResource(owner:string,id:string,orders:Map<string,MeliOrder>,rows:ReturnType<typeof normalizeOrders>,guard:WriteGuard){
+  const statements=[...orders.values()].map(order=>{const lines=rows.filter(r=>r.orderId===order.id);return this.db.prepare(`INSERT INTO meli_orders(id,owner_id,account_id,order_id,date,data,updated_at) SELECT ?,?,?,?,?,?,? WHERE ${guard.sql} ON CONFLICT(account_id,order_id) DO UPDATE SET date=excluded.date,data=excluded.data,updated_at=excluded.updated_at RETURNING id`).bind(id+':'+order.id,owner,id,order.id,lines[0].date,JSON.stringify(lines),this.now(),...guard.values())});
+  if(!statements.length)return;
+  const saved=await this.db.batch(statements);if(saved.some(r=>!r.results.length))throw new MeliError(409,'A conexão mudou durante a atualização.');
+ }
+ async processResource(owner:string,id:string,generation:string,resource:string){
+  if(!/^\/(orders|shipments)\/\d{1,30}$/.test(resource))throw new MeliError(400,'Recurso inválido.');
+  return accountLease(this.db,owner,id,generation,this.now,async guard=>{
+   const token=await this.accessToken(owner,id),c=await this.connection(owner,id),started=this.now();
+   if(c.generation!==generation||!c.seller_id)throw new MeliError(409,'A conexão mudou.');
+   const get=async(path:string)=>{if(this.now()>started+60000)throw new MeliError(503,'O processamento será retomado.');return this.remote(path,token)};
+   const orders=new Map<string,MeliOrder>();
+   const add=async(path:string)=>{const order=orderSchema.parse(await get(path));if(order.seller.id!==c.seller_id||path!=='/orders/'+order.id)throw new MeliError(502,'Não foi possível confirmar o pedido.');orders.set(order.id,order)};
+   if(resource.startsWith('/orders/'))await add(resource);
+   else{
+    const items=z.array(z.object({order_id:remoteId,sender_id:remoteId})).min(1).max(50).parse(await get(resource+'/items'));
+    if(items.some(i=>i.sender_id!==c.seller_id))throw new MeliError(502,'Não foi possível confirmar o envio.');
+    const ids=[...new Set(items.map(i=>i.order_id))];if(ids.length>15)throw new MeliError(502,'Envio acima do limite de conferência.');
+    for(const orderId of ids){await add('/orders/'+orderId);if(orders.get(orderId)?.shipping?.id!==resource.split('/')[2])throw new MeliError(502,'Envio inconsistente.');}
+   }
+   await this.saveResource(owner,id,orders,normalizeOrders(id,c.seller_id,[...orders.values()],[],new Map([...orders.keys()].map(key=>[key,'unknown' as const]))),guard);
+   const rows=await this.enrich(id,c.seller_id,orders,get);
+   await this.saveResource(owner,id,orders,rows,guard);
+  });
+ }
+ private async syncBatch(owner:string,id:string,mode:'auto'|'history',accountGuard:WriteGuard){
+  const token=await this.accessToken(owner,id);const c=await this.connection(owner,id);if(!c.seller_id)throw new MeliError(409,'Autorize o vendedor.');
+  const now=this.now(),runId=randomToken(),lease=randomToken();
+  // Search dates have hourly precision. Overlap one hour and freeze each window until complete.
+  const cursor=c.sync_cursor?Date.parse(c.sync_cursor):NaN;
+  const desiredMode=mode==='history'||!Number.isFinite(cursor)?'history':'incremental';
+  const from=new Date(desiredMode==='history'?now-30*86400000:cursor-3600000);from.setUTCMinutes(0,0,0);
+  const to=new Date(desiredMode==='history'?now+3600000:Math.min(now+3600000,from.getTime()+86400000));to.setUTCMinutes(0,0,0);
+  await this.db.prepare("INSERT INTO meli_sync_runs(account_id,owner_id,generation,id,mode,from_date,to_date,offset,status,updated_at) VALUES(?,?,?,?,?,?,?,0,'running',?) ON CONFLICT(account_id) DO UPDATE SET generation=excluded.generation,id=excluded.id,mode=excluded.mode,from_date=excluded.from_date,to_date=excluded.to_date,offset=0,total=NULL,needs_more=0,status='running',lease=NULL,lease_until=NULL,error=NULL,updated_at=excluded.updated_at WHERE meli_sync_runs.status='complete' OR meli_sync_runs.generation<>excluded.generation").bind(id,owner,c.generation,runId,desiredMode,from.toISOString(),to.toISOString(),now).run();
+  const run=await this.db.prepare("UPDATE meli_sync_runs SET lease=?,lease_until=?,status='running',error=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND generation=? AND (lease_until IS NULL OR lease_until<?) RETURNING *").bind(lease,now+90000,now,id,owner,c.generation,now).first<Run>();
+  if(!run)throw new MeliError(409,'Esta conta já está atualizando em outra aba. Aguarde a conclusão do lote.');
+  const guard="EXISTS(SELECT 1 FROM meli_sync_runs r JOIN meli_connections c ON c.account_id=r.account_id AND c.owner_id=r.owner_id WHERE r.account_id=? AND r.owner_id=? AND r.id=? AND r.lease=? AND r.generation=c.generation AND c.status='connected' AND r.lease_until>?) AND "+accountGuard.sql;
+  const guardValues=()=>[id,owner,run.id,lease,this.now(),...accountGuard.values()];
+  const get=async(path:string)=>{if(this.now()>now+60000)throw new MeliError(503,'O lote demorou além do esperado. Retome para tentar novamente.');return this.remote(path,token)};
+  try{
+   if(run.offset>=10000)throw new MeliError(409,'O limite de 10.000 pedidos desta atualização foi atingido. Os dados estão parciais; é necessário ampliar a sincronização por períodos.');
+   // Seller and dates scope the search; no status allowlist can omit cancellations or send unsupported filters.
+   const dateField=run.mode==='incremental'?'order.date_last_updated':'order.date_created';
+   const query=new URLSearchParams({seller:c.seller_id,sort:'date_asc',limit:'5',offset:String(run.offset),[dateField+'.from']:run.from_date,[dateField+'.to']:run.to_date});
+   const search=z.object({results:z.array(orderSchema).max(5),paging:z.object({total:z.number().int().nonnegative(),offset:z.number().int().nonnegative()})}).safeParse(await get('/orders/search?'+query));
+   if(!search.success||search.data.paging.offset!==run.offset)throw new MeliError(502,'O Mercado Livre retornou um lote incompleto. Retome a atualização.');
+   if(!search.data.results.length&&run.offset<search.data.paging.total)throw new MeliError(502,'A lista de pedidos mudou durante a leitura. Tente retomar.');
+   const orders=new Map<string,MeliOrder>();for(const order of search.data.results){if(order.seller.id!==c.seller_id)throw new MeliError(502,'Não foi possível confirmar o vendedor de um pedido.');orders.set(order.id,order);}
+   const rows=await this.enrich(id,c.seller_id,orders,get);
    const statements=[];
    // Save every member of each shipment in one D1 transaction, even outside the search page.
    for(const order of orders.values()){
@@ -158,10 +202,11 @@ export class MeliService {
     statements.push(this.db.prepare(`INSERT INTO meli_orders(id,owner_id,account_id,order_id,date,data,updated_at) SELECT ?,?,?,?,?,?,? WHERE ${guard} ON CONFLICT(account_id,order_id) DO UPDATE SET date=excluded.date,data=excluded.data,updated_at=excluded.updated_at`).bind(id+':'+order.id,owner,id,order.id,lines[0].date,JSON.stringify(lines),this.now(),...guardValues()));
    }
    const offset=run.offset+search.data.results.length,total=search.data.paging.total,status=offset>=total?'complete':'running';
-   if(status==='complete')statements.push(this.db.prepare(`UPDATE meli_connections SET synced_at=? WHERE account_id=? AND owner_id=? AND ${guard}`).bind(this.now(),id,owner,...guardValues()));
-   statements.push(this.db.prepare(`UPDATE meli_sync_runs SET offset=?,total=?,status=?,lease=NULL,lease_until=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND ${guard} RETURNING *`).bind(offset,total,status,this.now(),id,owner,...guardValues()));
+   const needsMore=status==='complete'&&Date.parse(run.to_date)<this.now();
+   if(status==='complete')statements.push(this.db.prepare(`UPDATE meli_connections SET synced_at=CASE WHEN ?=1 THEN synced_at ELSE ? END,sync_cursor=CASE WHEN sync_cursor IS NULL OR sync_cursor<? THEN ? ELSE sync_cursor END WHERE account_id=? AND owner_id=? AND ${guard}`).bind(needsMore?1:0,this.now(),run.to_date,run.to_date,id,owner,...guardValues()));
+   statements.push(this.db.prepare(`UPDATE meli_sync_runs SET offset=?,total=?,status=?,needs_more=?,lease=NULL,lease_until=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND ${guard} RETURNING *`).bind(offset,total,status,needsMore?1:0,this.now(),id,owner,...guardValues()));
    const saved=await this.db.batch(statements);if(!saved.at(-1)?.results.length)throw new MeliError(409,'A atualização foi cancelada ou substituída. Os dados anteriores foram preservados.');
-   return {status,processed:offset,total,fromDate:run.from_date,toDate:run.to_date};
+   return {status,mode:run.mode,needsMore,processed:offset,total,fromDate:run.from_date,toDate:run.to_date};
   }catch(error){
    const message=error instanceof MeliError?error.message:'O lote contém dados incompletos. Retome a atualização.';
    await this.db.prepare("UPDATE meli_sync_runs SET status='paused',error=?,lease=NULL,lease_until=NULL,updated_at=? WHERE owner_id=? AND account_id=? AND id=? AND lease=?").bind(message,this.now(),owner,id,run.id,lease).run();

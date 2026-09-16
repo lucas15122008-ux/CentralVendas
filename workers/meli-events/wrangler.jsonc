@@ -1,0 +1,12 @@
+{
+  "name": "central-vendas-meli-events",
+  "main": "worker.ts",
+  "compatibility_date": "2026-05-15",
+  "workers_dev": true,
+  "triggers": {"crons": ["* * * * *"]},
+  "queues": {
+    "producers": [{"binding": "EVENTS", "queue": "central-vendas-meli-events"}],
+    "consumers": [{"queue": "central-vendas-meli-events", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 8, "dead_letter_queue": "central-vendas-meli-failures", "max_concurrency": 1}]
+  },
+  "observability": {"enabled": false}
+}
