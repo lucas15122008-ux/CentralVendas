@@ -7,7 +7,7 @@ const SITE='https://central-vendas-lucas.kisashi.chatgpt.site';
 function configured(env:Env){return !!env.WEBHOOK_TOKEN&&!!env.MELI_APPLICATION_ID&&env.BRIDGE_SECRET?.length>=32&&!!env.SITE_BEARER;}
 export async function bridge(env:Env,payload:unknown){
  const body=JSON.stringify(payload),headers=await signAutomationHeaders(body,env.BRIDGE_SECRET);
- const response=await fetch(SITE+AUTOMATION_PATH,{method:'POST',headers:{...headers,Authorization:'Bearer '+env.SITE_BEARER},body,redirect:'manual',signal:AbortSignal.timeout(75000)});
+ const response=await fetch(SITE+AUTOMATION_PATH,{method:'POST',headers:{...headers,'OAI-Sites-Authorization':'Bearer '+env.SITE_BEARER},body,redirect:'manual',signal:AbortSignal.timeout(75000)});
  if(!response.ok||!response.headers.get('content-type')?.includes('application/json'))throw Error('bridge_unavailable');
  const result=await response.json() as {pending?:boolean;ok?:boolean};return result;
 }
