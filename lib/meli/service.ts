@@ -7,7 +7,7 @@ export class MeliError extends Error {status:number;constructor(status:number,me
 const configSchema=z.object({clientId:z.string().trim().regex(/^\d{3,30}$/),clientSecret:z.string().trim().min(8).max(500),pkce:z.boolean()});
 const tokenSchema=z.object({access_token:z.string().min(1).max(10000),refresh_token:z.string().min(1).max(10000),expires_in:z.number().int().positive().max(86400*365),user_id:remoteId});
 type App={owner_id:string;client_id:string;secret:string;pkce:number;revision:string};
-type Connection={account_id:string;owner_id:string;seller_id:string|null;nickname:string|null;status:string;generation:string;tokens:string|null;expires_at:number|null;refresh_started:number|null;sync_cursor:string|null};
+type Connection={account_id:string;owner_id:string;seller_id:string|null;nickname:string|null;status:string;generation:string;tokens:string|null;expires_at:number|null;refresh_started:number|null;sync_cursor:string|null;gross_sales_version:number};
 type Flow={account_id:string;generation:string;app_revision:string;verifier:string};
 type Run={id:string;account_id:string;owner_id:string;generation:string;mode:'history'|'incremental';from_date:string;to_date:string;offset:number;total:number|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
 type Fetcher=(url:string,init?:RequestInit)=>Promise<Response>;
@@ -143,7 +143,14 @@ export class MeliService {
  async sync(owner:string,id:string,mode:'auto'|'history'='auto',expectedGeneration?:string){
   const c=await this.connection(owner,id);
   if(expectedGeneration&&c.generation!==expectedGeneration)throw new MeliError(409,'A conexão mudou.');
-  try{return await accountLease(this.db,owner,id,c.generation,this.now,guard=>this.syncBatch(owner,id,mode,guard));}
+  try{return await accountLease(this.db,owner,id,c.generation,this.now,async guard=>{
+   if(c.gross_sales_version<2){
+    const reset=await this.db.prepare(`UPDATE meli_connections SET gross_sales_version=2,sync_cursor=NULL WHERE account_id=? AND owner_id=? AND generation=? AND gross_sales_version<2 AND ${guard.sql} RETURNING account_id`).bind(id,owner,c.generation,...guard.values()).first();
+    if(!reset)throw new MeliError(409,'A conexão mudou antes da releitura do faturamento. Tente novamente.');
+    await this.db.prepare("UPDATE meli_sync_runs SET status='complete',needs_more=1,lease=NULL,lease_until=NULL,error=NULL WHERE account_id=? AND owner_id=? AND generation=?").bind(id,owner,c.generation).run();
+   }
+   return this.syncBatch(owner,id,mode,guard);
+  });}
   catch(error){if(error instanceof Error&&error.message==='account_busy')throw new MeliError(409,'Esta conta já está atualizando. Aguarde a conclusão do lote.');throw error;}
  }
  async saveResource(owner:string,id:string,orders:Map<string,MeliOrder>,rows:ReturnType<typeof normalizeOrders>,guard:WriteGuard){

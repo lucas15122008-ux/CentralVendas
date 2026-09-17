@@ -55,6 +55,12 @@ test('depois do histórico busca somente alterações com sobreposição horári
  assert.equal(query.get('order.date_last_updated.to'),'2026-09-15T18:00:00.000Z');
  assert.equal(result.mode,'incremental');assert.equal(x.sqlite.prepare('SELECT count(*) AS n FROM meli_orders').get()?.n,1);
 });
+test('nova versão do faturamento relê o histórico uma vez e depois volta ao incremental',async()=>{
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=1");const fields:string[]=[];
+ x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
+ const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT gross_sales_version FROM meli_connections').get()?.gross_sales_version,2);
+ x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
+});
 test('falha incremental conserva cursor, período e offset até concluir',async()=>{
  const x=setup();await x.authorize();
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));await x.service.sync('owner','a');x.advance(2*3600000);
@@ -68,14 +74,14 @@ test('falha incremental conserva cursor, período e offset até concluir',async(
  assert.equal(x.sqlite.prepare('SELECT sync_cursor FROM meli_connections').get()?.sync_cursor,'2026-09-15T18:00:00.000Z');
 });
 test('janela incremental atrasada inclui sobreposição dentro de 24 horas',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z'");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  const result=await x.service.sync('owner','a');
  assert.equal(Date.parse(result.toDate)-Date.parse(result.fromDate),86400000);
  assert.equal(result.needsMore,true);
 });
 test('status preserva recuperação pendente depois de concluir janela intermediária',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z'");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  await x.service.sync('owner','a');assert.equal((await x.service.status('owner')).connections[0].needsMore,true);
  for(let n=0;n<4;n++){const r=await x.service.sync('owner','a');if(!r.needsMore)break;}

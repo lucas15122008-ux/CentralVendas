@@ -1,5 +1,5 @@
 export type CostRecord = { id:string; accountId:string; sku:string; description:string; unitCost:number; taxValue:number|null; taxType:'unit'|'percent'; taxTreatment:'included'|'additional'|'unknown'; validFrom:string; importedAt:string; importId:string };
-export type Sale = { id:string; orderId:string; accountId:string; sku:string; title:string; date:string; quantity:number; costQuantity:number|null; revenueCents:number|null; feeCents:number|null; shippingCents:number|null; otherCents:number|null; status:'paid'|'cancelled'|'refunded'|'pending'; source?:'mercadolivre'; sourceIssues?:string[]; itemId?:string; variationId?:string|null };
+export type Sale = { id:string; orderId:string; accountId:string; sku:string; title:string; date:string; quantity:number; costQuantity:number|null; grossSalesCents?:number|null; revenueCents:number|null; feeCents:number|null; shippingCents:number|null; otherCents:number|null; status:'paid'|'cancelled'|'refunded'|'pending'; source?:'mercadolivre'; sourceIssues?:string[]; itemId?:string; variationId?:string|null };
 export type SaleResult = Sale & { cost:CostRecord|null; costCents:number|null; taxCents:number|null; contributionCents:number|null; margin:number|null; reasons:string[] };
 export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
   const cost=costs.filter(c=>c.accountId===sale.accountId&&c.sku===sale.sku&&c.validFrom<=sale.date).sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.importedAt.localeCompare(a.importedAt))[0]??null;
@@ -19,11 +19,14 @@ export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
 }
 export function summarizeSales(sales:Sale[],costs:CostRecord[]) {
   const rows=sales.filter(s=>s.status!=='cancelled'&&s.status!=='pending').map(s=>calculateSale(s,costs));
+  const gross=(row:Sale)=>row.status==='paid'?(row.grossSalesCents??row.revenueCents):null;
+  const grossSalesCents=rows.reduce((sum,row)=>sum+(gross(row)??0),0);
   const revenueCents=rows.reduce((s,r)=>s+(r.revenueCents??0),0);
   const covered=rows.filter(r=>r.contributionCents!==null);
+  const coveredGrossSalesCents=covered.reduce((sum,row)=>sum+(gross(row)??0),0);
   const coveredRevenueCents=covered.reduce((s,r)=>s+(r.revenueCents??0),0);
   const contributionCents=covered.reduce((s,r)=>s+(r.contributionCents??0),0);
-  return {unknownRevenue:rows.filter(r=>r.revenueCents===null).length,revenueCents,contributionCents,coveredRevenueCents,coverage:revenueCents>0?coveredRevenueCents/revenueCents*100:0,margin:coveredRevenueCents>0?contributionCents/coveredRevenueCents*100:null,orders:new Set(rows.map(s=>s.accountId+'\0'+s.orderId)).size,rows};
+  return {unknownRevenue:rows.filter(r=>r.revenueCents===null).length,unknownGrossSales:rows.filter(r=>r.status==='paid'&&gross(r)===null).length,grossSalesCents,revenueCents,contributionCents,coveredRevenueCents,coveredGrossSalesCents,coverage:grossSalesCents>0?coveredGrossSalesCents/grossSalesCents*100:0,margin:coveredRevenueCents>0?contributionCents/coveredRevenueCents*100:null,orders:new Set(rows.map(s=>s.accountId+'\0'+s.orderId)).size,paidOrders:new Set(rows.filter(s=>s.status==='paid').map(s=>s.accountId+'\0'+s.orderId)).size,rows};
 }
 export function groupProducts(rows:SaleResult[]){
  const products=new Map<string,{sku:string;account:string;title:string;units:number;revenue:number;profit:number;complete:boolean}>();

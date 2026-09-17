@@ -1,0 +1,1 @@
+ALTER TABLE `meli_connections` ADD `gross_sales_version` integer DEFAULT 1 NOT NULL;
