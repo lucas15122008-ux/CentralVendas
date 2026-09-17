@@ -8,11 +8,13 @@ Primeiro incremento do aplicativo privado para gerenciar custos e margem de oper
 - Importação configurável de CSV/XLSX exportados do Citel, com prévia, vigência, custo unitário e imposto.
 - Histórico persistente, download privado do original e retirada de lotes sem apagar o histórico.
 - Cálculo testado de contribuição conhecida, sem duplicar imposto incluído, com pendências explícitas.
+- Conexão oficial com o Mercado Livre, histórico incremental e atualização automática por notificações.
+- Conciliação por anúncio, variação, SKU e vigência, com ajustes manuais versionados e despesas do Full separadas.
 - Painéis de demonstração, filtros, busca e detalhe da venda; interface em português, BRL e fuso de São Paulo.
 
 ## Limites atuais
 
-Não há conexão Mercado Livre, sincronização de vendas, publicidade, módulo de insights ou agente de IA. O cadastro de conta organiza planilhas; ele não conecta um vendedor. Os painéis financeiros usam exclusivamente exemplos identificados. A compatibilidade com a planilha específica do Citel ainda depende de uma amostra autorizada.
+Publicidade, módulo de insights e agente de IA ainda não foram implementados. Custos atuais não são aplicados retroativamente: vendas antigas precisam de uma base com a vigência correta ou de conciliação individual.
 
 ## Desenvolvimento
 

@@ -92,3 +92,25 @@ test('duas autorizações simultâneas mantêm o vínculo de cada aba',async()=>
  const jar=new Map(cookies.map(c=>[c.split('=')[0],c]));
  for(const f of flows){const r=await call('/api/meli/callback?state='+f.state+'&error=access_denied',{redirect:'manual',headers:{Cookie:auth.Cookie+'; '+[...jar.values()].join('; ')}});assert.match(new URL(r.headers.get('location')).searchParams.get('message'),/cancelada/);jar.delete(r.headers.get('set-cookie').split('=')[0]);await call('/api/meli/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountId:f.id})});}
 });
+test('conciliação: vínculo, ajuste, histórico, revisão e isolamento',async()=>{
+ const fixtureAccount='71000000-0000-4000-8000-000000000001';
+ const saleId=fixtureAccount+':9001:0';
+ const post=body=>call('/api/reconciliation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ let data=await workspace();let sale=data.sales.find(item=>item.id===saleId);assert.ok(sale?.sourceStamp);assert.equal(sale.saleRevision,0);
+ const linkRequest=crypto.randomUUID();
+ const link={kind:'product',action:'set',requestId:linkRequest,accountId:fixtureAccount,itemId:'MLB-QA-1',variationId:'FULL',validFrom:'2026-01-01',expectedRevision:0,sku:'64265',reason:'SKU conferido na planilha'};
+ const linked=await post(link);assert.equal(linked.status,201);assert.equal((await linked.json()).event.revision,1);
+ const replay=await post(link);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
+ assert.equal((await post({...link,requestId:crypto.randomUUID(),sku:'INEXISTENTE',expectedRevision:0})).status,404);
+ data=await workspace();sale=data.sales.find(item=>item.id===saleId);assert.equal(sale.costSku,'64265');assert.ok(sale.sourceStamp);
+ const adjustment={kind:'sale',action:'set',requestId:crypto.randomUUID(),accountId:fixtureAccount,saleId,expectedRevision:0,sourceStamp:sale.sourceStamp,channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:1500},reason:'Venda Full conferida'};
+ const adjusted=await post(adjustment);assert.equal(adjusted.status,201);
+ assert.equal((await post({...adjustment,requestId:crypto.randomUUID(),expectedRevision:0})).status,409);
+ data=await workspace();sale=data.sales.find(item=>item.id===saleId);assert.equal(sale.reconciliation.state,'manual');assert.equal(sale.reconciliation.amounts.fullExpenseCents,1500);assert.equal(data.reconciliationEvents.filter(event=>event.accountId===fixtureAccount).length,2);
+ const revisedCosts='codigo;descricao;custo;imposto\n64265;Radiador QA;110,00;0\n';
+ const imported=await upload(revisedCosts,{accountId:fixtureAccount,validFrom:'2026-09-17'});assert.equal(imported.status,201);
+ sale=(await workspace()).sales.find(item=>item.id===saleId);assert.equal(sale.reconciliation.state,'stale');
+ assert.equal((await post({...adjustment,requestId:crypto.randomUUID(),expectedRevision:1})).status,409);
+ assert.equal((await post({...link,requestId:crypto.randomUUID(),accountId:foreignAccount,expectedRevision:0})).status,404);
+ assert.equal((await fetch(base+'/api/reconciliation',{method:'POST',headers:{Cookie:auth.Cookie,'Content-Type':'application/json'},body:JSON.stringify(link)})).status,403);
+});
