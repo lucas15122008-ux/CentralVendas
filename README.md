@@ -12,6 +12,17 @@ Primeiro incremento do aplicativo privado para gerenciar custos e margem de oper
 - Conciliação por anúncio, variação, SKU e vigência, com ajustes manuais versionados e despesas do Full separadas.
 - Painéis de demonstração, filtros, busca e detalhe da venda; interface em português, BRL e fuso de São Paulo.
 
+## Conciliação mensal do Full
+
+1. Em **Produtos**, abra **Configurar anúncios** e vincule cada anúncio e variação do Mercado Livre ao SKU correspondente do Citel.
+2. Deixe a modalidade em **Detectar pelo Mercado Livre** quando o envio oficial estiver disponível. Quando não estiver, classifique aquele anúncio como **Mercado Livre Full** ou **Venda comum**.
+3. Durante o mês aberto, acompanhe a margem provisória. O sistema usa a média por unidade do último mês fechado; no primeiro mês sem referência, a margem permanece **A conferir**.
+4. Quando o demonstrativo mensal estiver disponível, abra **Conciliação**, escolha a conta e o mês e informe o valor total da despesa Full.
+5. Confira as unidades incluídas, as exclusões e os conflitos antes de confirmar. O total é rateado por unidade Full e os centavos são preservados.
+6. Se uma devolução ou mudança na origem alterar o mês, o fechamento aparece como **Revisar**. Retire o fechamento, confira os dados e salve uma nova revisão.
+
+Uma nova planilha de custos não é necessária para cada fechamento Full. Reimporte a planilha somente quando custo, imposto ou data de vigência mudar.
+
 ## Limites atuais
 
 Publicidade, módulo de insights e agente de IA ainda não foram implementados. Custos atuais não são aplicados retroativamente: vendas antigas precisam de uma base com a vigência correta ou de conciliação individual.
