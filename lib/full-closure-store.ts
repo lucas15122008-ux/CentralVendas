@@ -4,34 +4,34 @@ import {digest,HttpError} from './server.ts';
 
 export type FullClosureCommand={action:'set'|'clear';requestId:string;accountId:string;month:string;expectedRevision:number;totalExpenseCents?:number;reason:string};
 export type FullClosureProjection={sales:Sale[];costs:CostRecord[]};
-type ClosureRow={id:string;accountId:string;month:string;revision:number;action:string;totalExpenseCents:number|null;eligibleUnits:number;sourceStamp:string|null;reason:string;createdAt:string};
-type AllocationRow={closureId:string;saleId:string;units:number;expenseCents:number};
+export type FullClosureRow={id:string;accountId:string;month:string;revision:number;action:string;totalExpenseCents:number|null;eligibleUnits:number;sourceStamp:string|null;reason:string;createdAt:string};
+export type FullAllocationRow={closureId:string;saleId:string;units:number;expenseCents:number};
 const eventSelect='id,account_id AS accountId,month,revision,action,total_expense_cents AS totalExpenseCents,eligible_units AS eligibleUnits,source_stamp AS sourceStamp,reason,created_at AS createdAt';
 
-function closuresFromRows(events:ClosureRow[],allocations:AllocationRow[]):FullClosure[]{
+export function fullClosuresFromRows(events:FullClosureRow[],allocations:FullAllocationRow[]):FullClosure[]{
  const byClosure=new Map<string,FullClosure['allocations']>();
  for(const row of allocations){
   const current=byClosure.get(row.closureId)??[];
   current.push({saleId:row.saleId,units:row.units,expenseCents:row.expenseCents});
   byClosure.set(row.closureId,current);
  }
- return events.filter((row):row is ClosureRow&{action:'set'|'clear'}=>row.action==='set'||row.action==='clear').map(row=>({...row,allocations:(byClosure.get(row.id)??[]).sort((a,b)=>a.saleId.localeCompare(b.saleId))}));
+ return events.filter((row):row is FullClosureRow&{action:'set'|'clear'}=>row.action==='set'||row.action==='clear').map(row=>({...row,allocations:(byClosure.get(row.id)??[]).sort((a,b)=>a.saleId.localeCompare(b.saleId))}));
 }
 
 export async function loadFullClosures(db:D1Database,owner:string,accountId?:string):Promise<FullClosure[]>{
  const where=accountId?'owner_id=? AND account_id=?':'owner_id=?';
  const values=accountId?[owner,accountId]:[owner];
- const events=await db.prepare(`SELECT ${eventSelect} FROM full_closure_events WHERE ${where} ORDER BY month,revision`).bind(...values).all<ClosureRow>();
+ const events=await db.prepare(`SELECT ${eventSelect} FROM full_closure_events WHERE ${where} ORDER BY month,revision`).bind(...values).all<FullClosureRow>();
  if(!events.results.length)return [];
- const allocations=await db.prepare(`SELECT closure_id AS closureId,sale_id AS saleId,units,expense_cents AS expenseCents FROM full_closure_allocations WHERE ${where} ORDER BY closure_id,sale_id`).bind(...values).all<AllocationRow>();
- return closuresFromRows(events.results,allocations.results);
+ const allocations=await db.prepare(`SELECT closure_id AS closureId,sale_id AS saleId,units,expense_cents AS expenseCents FROM full_closure_allocations WHERE ${where} ORDER BY closure_id,sale_id`).bind(...values).all<FullAllocationRow>();
+ return fullClosuresFromRows(events.results,allocations.results);
 }
 
 async function replay(db:D1Database,owner:string,requestId:string):Promise<FullClosure|null>{
- const event=await db.prepare(`SELECT ${eventSelect} FROM full_closure_events WHERE owner_id=? AND request_id=?`).bind(owner,requestId).first<ClosureRow>();
+ const event=await db.prepare(`SELECT ${eventSelect} FROM full_closure_events WHERE owner_id=? AND request_id=?`).bind(owner,requestId).first<FullClosureRow>();
  if(!event||(event.action!=='set'&&event.action!=='clear'))return null;
- const allocations=await db.prepare('SELECT closure_id AS closureId,sale_id AS saleId,units,expense_cents AS expenseCents FROM full_closure_allocations WHERE owner_id=? AND closure_id=? ORDER BY sale_id').bind(owner,event.id).all<AllocationRow>();
- return closuresFromRows([event],allocations.results)[0]??null;
+ const allocations=await db.prepare('SELECT closure_id AS closureId,sale_id AS saleId,units,expense_cents AS expenseCents FROM full_closure_allocations WHERE owner_id=? AND closure_id=? ORDER BY sale_id').bind(owner,event.id).all<FullAllocationRow>();
+ return fullClosuresFromRows([event],allocations.results)[0]??null;
 }
 
 export async function saveFullClosure(db:D1Database,owner:string,command:FullClosureCommand,projection:FullClosureProjection):Promise<{closure:FullClosure;duplicate:boolean}>{

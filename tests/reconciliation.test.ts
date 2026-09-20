@@ -8,7 +8,7 @@ const cost:CostRecord={id:'c',accountId:'a',sku:'64265',description:'Radiador',u
 test('mesmo SKU mantém custo e desconta despesa Full apenas na venda ajustada',()=>{
  const common=calculateSale(sale,[cost]);
  const full=calculateSale({...sale,id:'a:2:0',revenueCents:25000,reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:1500}}},[cost]);
- assert.equal(common.costCents,10000);assert.equal(full.costCents,10000);assert.equal(full.contributionCents,10000);
+ assert.equal(common.costCents,10000);assert.equal(full.costCents,10000);assert.equal(full.contributionCents,10000);assert.equal(full.resultState,'manual');
 });
 test('ajuste parcial não transforma imposto desconhecido em zero',()=>{
  const result=calculateSale({...sale,reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:20000,feeCents:2000,shippingCents:1000,otherCents:0,costCents:10000,taxCents:null,fullExpenseCents:500}}},[]);

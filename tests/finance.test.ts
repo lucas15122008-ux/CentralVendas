@@ -23,3 +23,28 @@ test('SKU igual em contas diferentes não une produtos automaticamente',()=>{
 test('pedidos iguais de contas diferentes são contados separadamente',()=>assert.equal(summarizeSales([sale,{...sale,accountId:'other'}],[cost]).orders,2));
 test('valores desconhecidos do Mercado Livre impedem margem sem virar zero',()=>{const s:Sale={id:'ml',orderId:'1',accountId:'a',sku:'SKU',title:'Produto',date:'2026-09-01',quantity:1,costQuantity:1,revenueCents:null,feeCents:null,shippingCents:null,otherCents:0,status:'paid'};const result=calculateSale(s,[]);assert.equal(result.contributionCents,null);assert.ok(result.reasons.length>=4);assert.equal(summarizeSales([s],[]).unknownRevenue,1);});
 test('faturamento informado soma vendas pagas mesmo com receita a conciliar',()=>{const pending:Sale={...sale,id:'pending',orderId:'pending',grossSalesCents:25000,revenueCents:null,feeCents:null,shippingCents:null};const refunded:Sale={...sale,id:'refunded',orderId:'refunded',status:'refunded',grossSalesCents:null,revenueCents:null};const result=summarizeSales([pending,refunded],[]);assert.equal(result.grossSalesCents,25000);assert.equal(result.revenueCents,0);assert.equal(result.unknownRevenue,2);assert.equal(result.coverage,0);});
+test('fechamento mensal substitui zero manual e deduz uma vez',()=>{
+ const manual:Sale={...sale,reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:0}},fullExpense:{cents:1500,state:'closed',month:'2026-09',closureId:'c1',unitRateCents:1500}};
+ const result=calculateSale(manual,[cost]);
+ assert.equal(result.fullExpenseCents,1500);assert.equal(result.contributionCents,10000);assert.equal(result.resultState,'closed');
+});
+test('estimativa Full entra uma vez e deixa o resultado provisório',()=>{
+ const result=calculateSale({...sale,operation:{channel:'full',source:'product'},fullExpense:{cents:1000,state:'estimated',month:'2026-09',unitRateCents:500}},[cost]);
+ assert.equal(result.contributionCents,5000);assert.equal(result.resultState,'provisional');
+});
+test('primeiro mês Full sem referência continua pendente',()=>{
+ const result=calculateSale({...sale,operation:{channel:'full',source:'product'}},[cost]);
+ assert.equal(result.fullExpenseCents,null);assert.equal(result.contributionCents,null);assert.equal(result.resultState,'pending');assert.ok(result.reasons.some(reason=>reason.includes('Full')));
+});
+test('despesa Full manual positiva vale antes do fechamento',()=>{
+ const result=calculateSale({...sale,reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:20000,feeCents:3000,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:750}}},[cost]);
+ assert.equal(result.contributionCents,5250);assert.equal(result.resultState,'manual');
+});
+test('fechamento Full desatualizado impede contribuição',()=>{
+ const result=calculateSale({...sale,operation:{channel:'full',source:'product'},fullClosureState:'stale'},[cost]);
+ assert.equal(result.contributionCents,null);assert.equal(result.resultState,'stale');
+});
+test('venda comum completa permanece automática',()=>{
+ const result=calculateSale({...sale,operation:{channel:'other',source:'meli'}},[cost]);
+ assert.equal(result.contributionCents,6000);assert.equal(result.resultState,'automatic');
+});

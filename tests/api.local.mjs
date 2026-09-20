@@ -2,6 +2,7 @@
 // The fixed URL and development-only cookie prevent running against production.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {calculateSale} from '../lib/finance.ts';
 const base='http://127.0.0.1:5173';
 const auth={Cookie:'__sites_local_auth=1',Origin:base};
 const foreignAccount='70000000-0000-4000-8000-000000000001';
@@ -106,7 +107,8 @@ test('conciliação: vínculo, ajuste, histórico, revisão e isolamento',async(
  const adjustment={kind:'sale',action:'set',requestId:crypto.randomUUID(),accountId:fixtureAccount,saleId,expectedRevision:0,sourceStamp:sale.sourceStamp,channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:1500},reason:'Venda Full conferida'};
  const adjusted=await post(adjustment);assert.equal(adjusted.status,201);
  assert.equal((await post({...adjustment,requestId:crypto.randomUUID(),expectedRevision:0})).status,409);
- data=await workspace();sale=data.sales.find(item=>item.id===saleId);assert.equal(sale.reconciliation.state,'manual');assert.equal(sale.reconciliation.amounts.fullExpenseCents,1500);assert.equal(data.reconciliationEvents.filter(event=>event.accountId===fixtureAccount).length,2);
+ data=await workspace();sale=data.sales.find(item=>item.id===saleId);assert.equal(sale.reconciliation.state,'manual');assert.equal(sale.reconciliation.amounts.fullExpenseCents,1500);assert.equal(calculateSale(sale,data.costs).contributionCents,10000);assert.equal(calculateSale(sale,data.costs).resultState,'manual');assert.equal(data.reconciliationEvents.filter(event=>event.accountId===fixtureAccount).length,2);
+ const fresh=await workspace();assert.equal(calculateSale(fresh.sales.find(item=>item.id===saleId),fresh.costs).contributionCents,10000);
  const revisedCosts='codigo;descricao;custo;imposto\n64265;Radiador QA;110,00;0\n';
  const imported=await upload(revisedCosts,{accountId:fixtureAccount,validFrom:'2026-09-17'});assert.equal(imported.status,201);
  sale=(await workspace()).sales.find(item=>item.id===saleId);assert.equal(sale.reconciliation.state,'stale');
@@ -125,6 +127,7 @@ test('fechamento Full: prévia, rateio, revisão, conflito e rollback',async()=>
  const requestId=crypto.randomUUID();
  const close={action:'set',requestId,accountId:fixtureAccount,month,expectedRevision:0,totalExpenseCents:101,reason:'Demonstrativo Full setembro'};
  const saved=await postClosure(close);assert.equal(saved.status,201);let result=await saved.json();assert.equal(result.event.revision,1);assert.equal(result.event.allocations.length,1);assert.equal(result.event.allocations[0].expenseCents,101);
+ let projected=await workspace();let projectedSale=projected.sales.find(item=>item.id===fixtureAccount+':9101:0');assert.equal(projectedSale.fullExpense.state,'closed');assert.equal(projectedSale.fullExpense.cents,101);assert.equal(calculateSale(projectedSale,projected.costs).contributionCents,22899);assert.equal(calculateSale(projectedSale,projected.costs).resultState,'closed');assert.equal(projected.fullClosures.find(row=>row.id===result.event.id).action,'set');
  const replay=await postClosure(close);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
  assert.equal((await postClosure({...close,requestId:crypto.randomUUID()})).status,409);
  assert.equal((await call(`/api/full-closures?accountId=${foreignAccount}&month=${month}`)).status,404);
