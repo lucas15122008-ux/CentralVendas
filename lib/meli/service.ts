@@ -11,6 +11,7 @@ type Connection={account_id:string;owner_id:string;seller_id:string|null;nicknam
 type Flow={account_id:string;generation:string;app_revision:string;verifier:string};
 type Run={id:string;account_id:string;owner_id:string;generation:string;mode:'history'|'incremental';from_date:string;to_date:string;offset:number;total:number|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
 type Fetcher=(url:string,init?:RequestInit)=>Promise<Response>;
+const shipmentDetailSchema=z.object({id:remoteId,logistic:z.object({type:z.string().min(1).max(80).nullish()}).nullish(),logistic_type:z.string().min(1).max(80).nullish()});
 const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
 export class MeliService {
  db:D1Database;key:string;fetcher:Fetcher;now:()=>number;
@@ -118,7 +119,12 @@ export class MeliService {
  async enrich(id:string,seller:string,orders:Map<string,MeliOrder>,get:(path:string)=>Promise<unknown>){
    const shipments:ShipmentCost[]=[];
    for(const shipmentId of new Set([...orders.values()].map(o=>o.shipping?.id).filter((s):s is string=>!!s))){
-    const shipment:ShipmentCost={id:shipmentId,sellerCostCents:null,orderIds:[],complete:false};shipments.push(shipment);
+    const shipment:ShipmentCost={id:shipmentId,sellerCostCents:null,orderIds:[],complete:false,logisticType:null};shipments.push(shipment);
+    try{
+     const parsed=shipmentDetailSchema.safeParse(await get('/shipments/'+shipmentId));
+     if(!parsed.success||parsed.data.id!==shipmentId)throw new MeliError(502,'Não foi possível confirmar o envio.');
+     shipment.logisticType=parsed.data.logistic?.type??parsed.data.logistic_type??null;
+    }catch(error){if(!(error instanceof MeliError)||![403,404].includes(error.status))throw error;/* The sale remains usable while logistics stays unknown. */}
     try{
      const items=z.array(z.object({order_id:remoteId,sender_id:remoteId,item_id:z.string(),variation_id:remoteId.nullish(),quantity:z.number().positive()})).min(1).max(50).parse(await get('/shipments/'+shipmentId+'/items'));
      if(items.some(i=>i.sender_id!==seller))continue;
