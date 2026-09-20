@@ -114,3 +114,30 @@ test('conciliação: vínculo, ajuste, histórico, revisão e isolamento',async(
  assert.equal((await post({...link,requestId:crypto.randomUUID(),accountId:foreignAccount,expectedRevision:0})).status,404);
  assert.equal((await fetch(base+'/api/reconciliation',{method:'POST',headers:{Cookie:auth.Cookie,'Content-Type':'application/json'},body:JSON.stringify(link)})).status,403);
 });
+
+test('fechamento Full: prévia, rateio, revisão, conflito e rollback',async()=>{
+ const fixtureAccount='72000000-0000-4000-8000-000000000001';
+ const rollbackAccount='73000000-0000-4000-8000-000000000001';
+ const month='2026-09';
+ const postClosure=(body,headers={})=>call('/api/full-closures',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
+ let preview=await call(`/api/full-closures?accountId=${fixtureAccount}&month=${month}`);assert.equal(preview.status,200);
+ let data=await preview.json();assert.equal(data.preview.units,2);assert.equal(data.preview.eligible.length,1);assert.equal(data.preview.excluded.length,2);assert.equal(data.latest,null);
+ const requestId=crypto.randomUUID();
+ const close={action:'set',requestId,accountId:fixtureAccount,month,expectedRevision:0,totalExpenseCents:101,reason:'Demonstrativo Full setembro'};
+ const saved=await postClosure(close);assert.equal(saved.status,201);let result=await saved.json();assert.equal(result.event.revision,1);assert.equal(result.event.allocations.length,1);assert.equal(result.event.allocations[0].expenseCents,101);
+ const replay=await postClosure(close);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
+ assert.equal((await postClosure({...close,requestId:crypto.randomUUID()})).status,409);
+ assert.equal((await call(`/api/full-closures?accountId=${foreignAccount}&month=${month}`)).status,404);
+ assert.equal((await postClosure({...close,requestId:crypto.randomUUID(),accountId:foreignAccount})).status,404);
+ assert.equal((await fetch(base+'/api/full-closures',{method:'POST',headers:{Cookie:auth.Cookie,'Content-Type':'application/json'},body:JSON.stringify({...close,requestId:crypto.randomUUID()})})).status,403);
+ const clear=await postClosure({action:'clear',requestId:crypto.randomUUID(),accountId:fixtureAccount,month,expectedRevision:1,reason:'Reabrir para corrigir demonstrativo'});assert.equal(clear.status,201);assert.equal((await clear.json()).event.revision,2);
+ preview=await call(`/api/full-closures?accountId=${fixtureAccount}&month=${month}`);data=await preview.json();assert.equal(data.latest.action,'clear');assert.equal(data.history.length,2);
+
+ const saleId=fixtureAccount+':9101:0';const sale=(await workspace()).sales.find(item=>item.id===saleId);assert.ok(sale?.sourceStamp);
+ const adjustment={kind:'sale',action:'set',requestId:crypto.randomUUID(),accountId:fixtureAccount,saleId,expectedRevision:0,sourceStamp:sale.sourceStamp,channel:'full',amounts:{revenueCents:50000,feeCents:5000,shippingCents:2000,otherCents:0,costCents:20000,taxCents:0,fullExpenseCents:50},reason:'Despesa Full individual já conferida'};
+ const adjusted=await call('/api/reconciliation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(adjustment)});assert.equal(adjusted.status,201);
+ const conflict=await postClosure({...close,requestId:crypto.randomUUID(),expectedRevision:2});assert.equal(conflict.status,409);assert.match((await conflict.json()).error,/individual/i);
+
+ const failed=await postClosure({action:'set',requestId:crypto.randomUUID(),accountId:rollbackAccount,month,expectedRevision:0,totalExpenseCents:100,reason:'Forçar rollback das parcelas'});assert.equal(failed.status,500);
+ const afterFailure=await call(`/api/full-closures?accountId=${rollbackAccount}&month=${month}`);assert.equal(afterFailure.status,200);assert.equal((await afterFailure.json()).history.length,0);
+});

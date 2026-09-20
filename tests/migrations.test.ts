@@ -16,3 +16,23 @@ test('migração do faturamento marca conexões existentes para releitura',()=>{
  const version=columns.find(column=>column.name==='gross_sales_version');
  assert.deepEqual(version&&{notnull:version.notnull,dflt_value:version.dflt_value},{notnull:1,dflt_value:'1'});
 });
+
+test('migração cria fechamentos Full auditáveis e agenda releitura logística',()=>{
+ const sqlite=new DatabaseSync(':memory:');
+ const root=new URL('../drizzle/',import.meta.url);
+ const files=readdirSync(root).filter(file=>file.endsWith('.sql')).sort();
+ for(const file of files)sqlite.exec(readFileSync(new URL(file,root),'utf8'));
+ const tables=sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name);
+ assert.ok(tables.includes('full_closure_events'));
+ assert.ok(tables.includes('full_closure_allocations'));
+ const columns=sqlite.prepare("PRAGMA table_info('meli_connections')").all();
+ const version=columns.find(column=>column.name==='logistics_version');
+ assert.deepEqual(version&&{notnull:version.notnull,dflt_value:version.dflt_value},{notnull:1,dflt_value:'1'});
+ const eventIndexes=sqlite.prepare("PRAGMA index_list('full_closure_events')").all().map(row=>row.name);
+ assert.ok(eventIndexes.includes('idx_full_closure_owner_request'));
+ assert.ok(eventIndexes.includes('idx_full_closure_revision'));
+ assert.ok(eventIndexes.includes('idx_full_closure_owner_month'));
+ const allocationIndexes=sqlite.prepare("PRAGMA index_list('full_closure_allocations')").all().map(row=>row.name);
+ assert.ok(allocationIndexes.includes('idx_full_allocation_closure_sale'));
+ assert.ok(allocationIndexes.includes('idx_full_allocation_owner_account'));
+});
