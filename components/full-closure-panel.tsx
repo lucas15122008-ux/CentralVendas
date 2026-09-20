@@ -1,0 +1,42 @@
+'use client';
+import {useCallback,useEffect,useRef,useState} from 'react';
+import {Button} from '@/components/ui/button';
+import {Input} from '@/components/ui/input';
+import {Textarea} from '@/components/ui/textarea';
+import {Choice} from './commerce-controls';
+import {money,type Sale} from '@/lib/finance';
+import {parseBrlCents,type FullClosure,type FullPreview} from '@/lib/full-reconciliation';
+import type {Account,FullClosureSummary} from '@/lib/demo';
+import {businessDate} from '@/lib/dates';
+import {CalendarRange,CheckCircle2,History,LoaderCircle,RefreshCw,TriangleAlert,Undo2} from 'lucide-react';
+import {toast} from 'sonner';
+
+type PreviewResponse={preview:FullPreview;latest:FullClosure|null;history:FullClosure[];previousUnitRateCents:number|null;error?:string};
+const currentMonth=()=>businessDate().slice(0,7);
+
+export function FullClosurePanel({accounts,closures,demo,onReload}:{accounts:Account[];closures:FullClosureSummary[];demo:boolean;onReload:()=>Promise<void>}){
+ const [accountId,setAccountId]=useState(accounts[0]?.id??'');const [month,setMonth]=useState(currentMonth());const [data,setData]=useState<PreviewResponse|null>(null);const [loading,setLoading]=useState(false);const [busy,setBusy]=useState<'set'|'clear'|null>(null);const [error,setError]=useState('');const [total,setTotal]=useState('');const [reason,setReason]=useState('');const [confirming,setConfirming]=useState(false);const loadRevision=useRef(0);
+ useEffect(()=>{if(!accounts.some(account=>account.id===accountId))setAccountId(accounts[0]?.id??'')},[accounts,accountId]);
+ const load=useCallback(async()=>{const revision=++loadRevision.current;if(demo||!accounts.some(account=>account.id===accountId)){setData(null);setError('');setLoading(false);return;}setLoading(true);setError('');try{const response=await fetch(`/api/full-closures?accountId=${encodeURIComponent(accountId)}&month=${encodeURIComponent(month)}`);const result=await response.json() as PreviewResponse;if(!response.ok)throw Error(result.error);if(revision===loadRevision.current)setData(result);}catch(cause){if(revision===loadRevision.current)setError(cause instanceof Error?cause.message:'Não foi possível carregar o fechamento Full.')}finally{if(revision===loadRevision.current)setLoading(false)}},[accountId,accounts,demo,month]);
+ useEffect(()=>{void load()},[load]);
+ const parsedTotal=parseBrlCents(total);const units=data?.preview.units??0;const average=parsedTotal!==null&&units>0?Math.round(parsedTotal/units):null;const estimate=data?.previousUnitRateCents===null||data?.previousUnitRateCents===undefined?null:data.previousUnitRateCents*units;
+ const fallback=closures.find(row=>row.accountId===accountId&&row.month===month);const latest=data?.latest??fallback??null;
+ const state=latest?.action==='set'?(latest.stale?'Revisar':'Fechado'):data?.preview.conflicts.length?'Revisar':data?.previousUnitRateCents!==null&&data?.previousUnitRateCents!==undefined?'Provisório':'Aberto';
+ const canClose=!demo&&!loading&&!busy&&units>0&&!(data?.preview.conflicts.length)&&parsedTotal!==null&&reason.trim().length>=3;
+ async function submit(action:'set'|'clear'){
+  if(!accountId||!data)return;if(reason.trim().length<3){setError('Explique o motivo do fechamento ou da retirada.');return;}
+  setBusy(action);setError('');try{const response=await fetch('/api/full-closures',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,requestId:crypto.randomUUID(),accountId,month,expectedRevision:data.latest?.revision??0,...(action==='set'?{totalExpenseCents:parsedTotal}:{}),reason:reason.trim()})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error);await onReload();await load();setConfirming(false);setReason('');if(action==='set')setTotal('');toast.success(action==='set'?'Mês Full fechado e vendas recalculadas.':'Fechamento retirado. O histórico foi preservado.');}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível salvar o fechamento Full.')}finally{setBusy(null)}
+ }
+ if(!accounts.length)return <section className="panel full-closure-panel"><div className="panel-heading"><div><h2>Fechamento mensal Full</h2><p>Cadastre uma conta antes de fechar as despesas do Full.</p></div></div></section>;
+ return <section className="panel full-closure-panel"><div className="panel-heading"><div><h2>Fechamento mensal Full</h2><p>Informe o total mensal. O sistema divide o valor pelas unidades Full elegíveis.</p></div><span className={state==='Fechado'?'margin-pill':state==='Revisar'?'pending-pill':'neutral-pill'}>{state}</span></div>
+  <div className="full-closure-body"><div className="full-closure-filters"><label>Conta<Choice label="Conta do fechamento Full" value={accountId} onChange={value=>{setAccountId(value);setConfirming(false)}} options={accounts.map(account=>({value:account.id,label:account.name}))}/></label><label>Mês de competência<Input type="month" value={month} onChange={event=>{setMonth(event.target.value);setConfirming(false)}}/></label><Button variant="outline" disabled={loading||demo} onClick={()=>void load()}>{loading?<LoaderCircle className="animate-spin"/>:<RefreshCw/>}Atualizar prévia</Button></div>
+  {demo?<p className="info-box">A demonstração é somente leitura. Na operação real, selecione a conta e o mês do demonstrativo.</p>:error&&<p className="error-box" role="alert">{error}</p>}
+  <div className="full-closure-metrics"><div><span>Unidades Full elegíveis</span><strong>{units.toLocaleString('pt-BR')}</strong></div><div><span>Vendas elegíveis</span><strong>{(data?.preview.eligible.length??0).toLocaleString('pt-BR')}</strong></div><div><span>Média do último mês válido</span><strong>{money(data?.previousUnitRateCents??null)}</strong></div><div><span>Estimativa deste mês</span><strong>{money(estimate)}</strong></div></div>
+  {!!data?.preview.conflicts.length&&<div className="warning-box"><TriangleAlert size={17}/><p>{data.preview.conflicts.join(' ')} Remova a despesa individual antes de fechar o mês.</p></div>}
+  <div className="full-closure-lists"><div><h3>Entram no rateio</h3>{data?.preview.eligible.length?<div className="closure-scroll">{data.preview.eligible.map((sale:Sale)=><div key={sale.id}><span>Pedido #{sale.orderId}</span><strong>{sale.costQuantity} un.</strong></div>)}</div>:<p className="note-text">Nenhuma venda Full paga com quantidade confirmada.</p>}</div><div><h3>Não entram</h3>{data?.preview.excluded.length?<div className="closure-scroll">{data.preview.excluded.map(row=><div key={row.saleId}><span>{row.saleId.split(':').at(-2)??row.saleId}</span><strong>{row.reason}</strong></div>)}</div>:<p className="note-text">Nenhuma exclusão neste mês.</p>}</div></div>
+  <div className="full-closure-form"><label>Total do demonstrativo Full<Input inputMode="decimal" placeholder="Ex.: 10.000,00" value={total} onChange={event=>{setTotal(event.target.value);setConfirming(false)}}/></label><label>Motivo<Textarea maxLength={240} placeholder="Ex.: demonstrativo Full de setembro" value={reason} onChange={event=>setReason(event.target.value)}/></label></div>
+  {confirming&&parsedTotal!==null&&<div className="closure-confirm"><CheckCircle2 size={19}/><div><strong>Confirmar {money(parsedTotal)} em {units.toLocaleString('pt-BR')} unidades?</strong><p>Média aproximada de {money(average)} por unidade. Os centavos serão preservados no rateio.</p></div><Button disabled={!!busy} onClick={()=>void submit('set')}>{busy==='set'?<LoaderCircle className="animate-spin"/>:<CheckCircle2/>}Confirmar fechamento</Button></div>}
+  <div className="dialog-actions"><div>{latest?.action==='set'&&<Button variant="ghost" disabled={demo||!!busy||reason.trim().length<3} onClick={()=>void submit('clear')}>{busy==='clear'?<LoaderCircle className="animate-spin"/>:<Undo2/>}Retirar fechamento</Button>}</div><Button disabled={!canClose} onClick={()=>setConfirming(true)}><CalendarRange/>Revisar e fechar mês</Button></div>
+  {!!data?.history.length&&<div className="closure-history"><h3><History size={16}/>Histórico do mês</h3>{[...data.history].sort((a,b)=>b.revision-a.revision).map(row=><div key={row.id}><span>Revisão {row.revision} · {row.action==='set'?'Fechado':'Retirado'}</span><strong>{row.action==='set'?money(row.totalExpenseCents):row.reason}</strong><small>{new Date(row.createdAt).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo'})}</small></div>)}</div>}
+  </div></section>;
+}

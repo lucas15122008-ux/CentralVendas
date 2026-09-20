@@ -11,6 +11,8 @@ import type {Account} from '@/lib/demo';
 import {businessDate} from '@/lib/dates';
 import {CheckCircle2,ClipboardCheck,History,Link2,LoaderCircle,Package,RefreshCw,Search,TriangleAlert,Unlink} from 'lucide-react';
 import {toast} from 'sonner';
+import {FullClosurePanel} from './full-closure-panel';
+import type {FullClosureSummary} from '@/lib/demo';
 
 type StatusFilter='attention'|'all'|'manual'|'automatic';
 const amountFields:[keyof ReconciliationAmounts,string,string][]=[['revenueCents','Receita líquida','Valor recebido pelos itens'],['feeCents','Tarifas','Tarifas do Mercado Livre'],['shippingCents','Frete do vendedor','Parcela de frete paga pela operação'],['otherCents','Outras despesas','Descontos e despesas variáveis'],['costCents','Custo consumido','Custo total das unidades'],['taxCents','Imposto adicional','Use zero quando já estiver incluído no custo'],['fullExpenseCents','Despesa adicional Full','Armazenagem e outras despesas exclusivas do Full']];
@@ -18,7 +20,7 @@ const statusLabel={stale:'Revisar ajuste','manual-pending':'Manual pendente',man
 const centsToInput=(value:number|null|undefined)=>value===null||value===undefined?'':(value/100).toFixed(2).replace('.',',');
 function inputToCents(value:string){const compact=value.trim().replace(/\s/g,'');if(!compact)return null;const normalized=compact.includes(',')?compact.replace(/\./g,'').replace(',','.'):compact;const number=Number(normalized);if(!Number.isFinite(number)||number<0)return undefined;return Math.round(number*100);}
 
-export function ReconciliationView({sales,costs,accounts,events,demo,onReload}:{sales:Sale[];costs:CostRecord[];accounts:Account[];events:ReconciliationEvent[];demo:boolean;onReload:()=>Promise<void>}){
+export function ReconciliationView({sales,costs,accounts,events,closures,demo,onReload}:{sales:Sale[];costs:CostRecord[];accounts:Account[];events:ReconciliationEvent[];closures:FullClosureSummary[];demo:boolean;onReload:()=>Promise<void>}){
  const [search,setSearch]=useState('');const [filter,setFilter]=useState<StatusFilter>('attention');const [selectedId,setSelectedId]=useState<string|null>(null);
  const calculated=useMemo(()=>summarizeSales(sales,costs).rows,[sales,costs]);
  const selected=selectedId?calculated.find(row=>row.id===selectedId)??null:null;
@@ -27,14 +29,14 @@ export function ReconciliationView({sales,costs,accounts,events,demo,onReload}:{
   return matches&&(filter==='all'||filter==='attention'&&['pending','manual-pending','stale'].includes(value)||filter==='manual'&&value==='manual'||filter==='automatic'&&value==='automatic');
  }).sort((a,b)=>{const order={stale:0,'manual-pending':1,pending:2,manual:3,automatic:4};return order[reconciliationStatus(a)]-order[reconciliationStatus(b)]||b.date.localeCompare(a.date)});
  const stats={attention:calculated.filter(row=>['stale','manual-pending','pending'].includes(reconciliationStatus(row))).length,stale:calculated.filter(row=>reconciliationStatus(row)==='stale').length,manual:calculated.filter(row=>reconciliationStatus(row)==='manual').length,automatic:calculated.filter(row=>reconciliationStatus(row)==='automatic').length};
- return <><div className="reconciliation-stats"><div><span>Pedem atenção</span><strong>{stats.attention}</strong></div><div><span>Ajustes para revisar</span><strong>{stats.stale}</strong></div><div><span>Conciliadas manualmente</span><strong>{stats.manual}</strong></div><div><span>Calculadas automaticamente</span><strong>{stats.automatic}</strong></div></div>
+ return <><FullClosurePanel accounts={accounts} closures={closures} demo={demo} onReload={onReload}/><div className="reconciliation-stats"><div><span>Pedem atenção</span><strong>{stats.attention}</strong></div><div><span>Ajustes para revisar</span><strong>{stats.stale}</strong></div><div><span>Conciliadas manualmente</span><strong>{stats.manual}</strong></div><div><span>Calculadas automaticamente</span><strong>{stats.automatic}</strong></div></div>
  <section className="panel"><div className="panel-heading reconciliation-heading"><div><h2>Conciliação das vendas</h2><p>Vincule anúncios à planilha e confirme os valores que não vieram completos.</p></div><div className="reconciliation-tools"><Choice label="Situação" value={filter} onChange={value=>setFilter(value as StatusFilter)} options={[{value:'attention',label:'Pedem atenção'},{value:'all',label:'Todas as vendas'},{value:'manual',label:'Conciliadas'},{value:'automatic',label:'Automáticas'}]}/><div className="search-field"><Search size={17}/><Input aria-label="Buscar conciliação" placeholder="Pedido, produto ou SKU" value={search} onChange={event=>setSearch(event.target.value)}/></div></div></div>
  <DataTable data={rows} empty={filter==='attention'?'Nenhuma venda pede conciliação neste período.':'Nenhuma venda encontrada.'} columns={[
   {accessorKey:'orderId',header:'Pedido',cell:({row})=><button className="order-link" onClick={()=>setSelectedId(row.original.id)}>#{row.original.orderId}<small>{row.original.date.split('-').reverse().join('/')}</small></button>},
   {accessorKey:'title',header:'Produto',cell:({row})=><div className="product-cell"><span className="product-icon"><Package size={18}/></span><div><strong>{row.original.title}</strong><small>SKU da venda {row.original.sku}{row.original.costSku?` · custo ${row.original.costSku}`:''}</small></div></div>},
   {accessorKey:'accountId',header:'Conta',cell:({getValue})=>accounts.find(account=>account.id===getValue())?.name},
   {id:'status',header:'Situação',cell:({row})=>{const value=reconciliationStatus(row.original);return <span className={value==='manual'?'margin-pill':value==='automatic'?'neutral-pill':'pending-pill'}>{statusLabel[value]}</span>}},
-  {accessorKey:'contributionCents',header:'Contribuição',cell:({row})=>row.original.contributionCents===null?'—':money(row.original.contributionCents)},
+  {accessorKey:'contributionCents',header:'Contribuição',cell:({row})=>row.original.contributionCents===null?<span className="pending-pill">A conferir</span>:<div className="result-cell"><strong>{money(row.original.contributionCents)}</strong>{row.original.resultState==='provisional'&&<small>Provisória</small>}{row.original.resultState==='closed'&&<small>Fechada</small>}</div>},
   {id:'action',header:'Ação',cell:({row})=><Button size="sm" variant="outline" onClick={()=>setSelectedId(row.original.id)}>{reconciliationStatus(row.original)==='automatic'?'Conferir':'Conciliar'}</Button>},
  ]}/></section>
  <div className="note reconciliation-note"><ClipboardCheck size={17}/><p>Os dados originais do Mercado Livre e da planilha permanecem intactos. Cada correção cria uma nova revisão com data e motivo.</p></div>
