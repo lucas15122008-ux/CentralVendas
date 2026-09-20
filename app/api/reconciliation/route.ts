@@ -13,7 +13,7 @@ const amounts=z.object({revenueCents:cents,feeCents:cents,shippingCents:cents,ot
 const productBase={kind:z.literal('product'),requestId,accountId,itemId:z.string().trim().min(1).max(80),variationId:z.string().trim().max(80).nullable().optional(),validFrom:validDate,expectedRevision:revision,reason};
 const saleBase={kind:z.literal('sale'),requestId,accountId,saleId:z.string().trim().min(1).max(200),expectedRevision:revision,reason};
 const inputSchema=z.union([
- z.object({...productBase,action:z.literal('set'),sku:z.string().trim().min(1).max(120)}),
+ z.object({...productBase,action:z.literal('set'),sku:z.string().trim().min(1).max(120),channel:z.enum(['full','other','unknown']).default('unknown')}),
  z.object({...productBase,action:z.literal('clear')}),
  z.object({...saleBase,action:z.literal('set'),sourceStamp:z.string().min(2).max(12_000),channel:z.enum(['full','other','unknown']),amounts}),
  z.object({...saleBase,action:z.literal('clear')}),
@@ -49,7 +49,7 @@ export async function POST(request:Request){try{
   if(input.action==='set'){
    const cost=await db.prepare('SELECT c.id FROM cost_versions c JOIN imports i ON i.id=c.import_id WHERE c.owner_id=? AND c.account_id=? AND c.sku=? AND i.owner_id=? AND i.withdrawn_at IS NULL LIMIT 1').bind(user,input.accountId,input.sku,user).first();
    if(!cost)throw new HttpError(404,'SKU não encontrado nos custos ativos desta conta.');
-   payload=JSON.stringify({kind:'product',sku:input.sku});
+   payload=JSON.stringify({kind:'product',sku:input.sku,channel:input.channel});
   }
  }else{
   const source=saleSources.find(item=>item.sale.id===input.saleId);if(!source)throw new HttpError(404,'Venda não encontrada nesta conta.');const sale=source.sale;

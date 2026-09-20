@@ -1,7 +1,7 @@
-import type {CostRecord,ReconciliationAmounts,Sale} from './finance.ts';
+import type {CostRecord,ReconciliationAmounts,Sale,SaleOperation,SalesChannel} from './finance.ts';
 
-export type ProductLinkPayload={kind:'product';sku:string};
-export type SaleAdjustmentPayload={kind:'sale';channel:'full'|'other'|'unknown';amounts:ReconciliationAmounts};
+export type ProductLinkPayload={kind:'product';sku:string;channel?:SalesChannel};
+export type SaleAdjustmentPayload={kind:'sale';channel:SalesChannel;amounts:ReconciliationAmounts};
 export type ReconciliationPayload=ProductLinkPayload|SaleAdjustmentPayload;
 export type ReconciliationEvent={
  id:string;accountId:string;targetType:'product'|'sale';targetKey:string;validFrom:string;revision:number;
@@ -20,6 +20,17 @@ export function reconciliationEventFromRow(row:ReconciliationEventRow):Reconcili
 export function reconciliationEventsFromRows(rows:ReconciliationEventRow[]){return rows.map(reconciliationEventFromRow).filter((event):event is ReconciliationEvent=>event!==null);}
 
 export function productTargetKey(itemId:string,variationId?:string|null){return JSON.stringify([itemId,variationId??null]);}
+const commonLogistics=new Set(['drop_off','cross_docking','xd_drop_off','self_service','default','custom']);
+export function resolveOperation(logisticType:string|null|undefined,manualChannel:SalesChannel='unknown',productChannel:SalesChannel='unknown'):SaleOperation{
+ const official:SalesChannel=logisticType==='fulfillment'?'full':logisticType&&commonLogistics.has(logisticType)?'other':'unknown';
+ if(official!=='unknown'){
+  const conflict=[manualChannel,productChannel].some(channel=>channel!=='unknown'&&channel!==official)?'A modalidade configurada diverge do envio do Mercado Livre.':undefined;
+  return {channel:official,source:'meli',...(conflict?{conflict}:{})};
+ }
+ if(manualChannel!=='unknown')return {channel:manualChannel,source:'manual'};
+ if(productChannel!=='unknown')return {channel:productChannel,source:'product'};
+ return {channel:'unknown',source:'unknown'};
+}
 export type ReconciliationStatus='stale'|'manual-pending'|'manual'|'pending'|'automatic';
 export function reconciliationStatus(sale:{contributionCents:number|null;reconciliation?:Sale['reconciliation']}):ReconciliationStatus{
  if(sale.reconciliation?.state==='stale')return 'stale';
@@ -38,7 +49,7 @@ function currentCost(sale:Sale,costs:CostRecord[]){
 
 export function saleSourceStamp(sale:Sale,cost:CostRecord|null){
  return JSON.stringify({
-  sale:{id:sale.id,orderId:sale.orderId,accountId:sale.accountId,sku:sale.sku,costSku:sale.costSku??null,itemId:sale.itemId??null,variationId:sale.variationId??null,date:sale.date,quantity:sale.quantity,costQuantity:sale.costQuantity,grossSalesCents:sale.grossSalesCents??null,revenueCents:sale.revenueCents,feeCents:sale.feeCents,shippingCents:sale.shippingCents,otherCents:sale.otherCents,status:sale.status,sourceIssues:sale.sourceIssues??[]},
+  sale:{id:sale.id,orderId:sale.orderId,accountId:sale.accountId,sku:sale.sku,costSku:sale.costSku??null,itemId:sale.itemId??null,variationId:sale.variationId??null,logisticType:sale.logisticType??null,date:sale.date,quantity:sale.quantity,costQuantity:sale.costQuantity,grossSalesCents:sale.grossSalesCents??null,revenueCents:sale.revenueCents,feeCents:sale.feeCents,shippingCents:sale.shippingCents,otherCents:sale.otherCents,status:sale.status,sourceIssues:sale.sourceIssues??[]},
   cost:cost?{id:cost.id,sku:cost.sku,unitCost:cost.unitCost,taxValue:cost.taxValue,taxType:cost.taxType,taxTreatment:cost.taxTreatment,validFrom:cost.validFrom,importedAt:cost.importedAt}:null,
  });
 }
@@ -68,6 +79,8 @@ export function applyReconciliation(sales:Sale[],costs:CostRecord[],events:Recon
   if(adjustment?.action==='set'&&adjustment.payload?.kind==='sale'){
    sale.reconciliation={state:adjustment.sourceStamp===stamp?'manual':'stale',channel:adjustment.payload.channel,amounts:adjustment.payload.amounts};
   }
-  return sale;
+  const manualChannel=sale.reconciliation?.state==='manual'?sale.reconciliation.channel:'unknown';
+  const productChannel=link?.payload?.kind==='product'?link.payload.channel??'unknown':'unknown';
+  return {...sale,operation:resolveOperation(sale.logisticType,manualChannel,productChannel)};
  });
 }
