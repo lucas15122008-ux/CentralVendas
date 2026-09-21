@@ -127,6 +127,7 @@ test('fechamento Full: prévia, rateio, revisão, conflito e rollback',async()=>
  const requestId=crypto.randomUUID();
  const close={action:'set',requestId,accountId:fixtureAccount,month,expectedRevision:0,totalExpenseCents:101,reason:'Demonstrativo Full setembro'};
  const saved=await postClosure(close);assert.equal(saved.status,201);let result=await saved.json();assert.equal(result.event.revision,1);assert.equal(result.event.allocations.length,1);assert.equal(result.event.allocations[0].expenseCents,101);
+ const closedPreview=await call(`/api/full-closures?accountId=${fixtureAccount}&month=${month}`);assert.equal(closedPreview.status,200);assert.equal((await closedPreview.json()).estimatedExpenseCents,null);
  let projected=await workspace();let projectedSale=projected.sales.find(item=>item.id===fixtureAccount+':9101:0');assert.equal(projectedSale.fullExpense.state,'closed');assert.equal(projectedSale.fullExpense.cents,101);assert.equal(calculateSale(projectedSale,projected.costs).contributionCents,22899);assert.equal(calculateSale(projectedSale,projected.costs).resultState,'closed');assert.equal(projected.fullClosures.find(row=>row.id===result.event.id).action,'set');
  const replay=await postClosure(close);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
  assert.equal((await postClosure({...close,requestId:crypto.randomUUID()})).status,409);

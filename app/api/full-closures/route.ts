@@ -49,7 +49,7 @@ export async function GET(request:Request){try{
   if(candidate.sourceStamp===source){previous=candidate;break;}
  }
  const previousUnitRateCents=previous?Math.round(previous.totalExpenseCents!/previous.eligibleUnits):null;
- const estimatedExpenseCents=previous?applyFullClosures(projection.sales,[previous]).filter(sale=>sale.accountId===parsed.data.accountId&&sale.date.slice(0,7)===parsed.data.month&&sale.fullExpense?.state==='estimated').reduce((sum,sale)=>sum+sale.fullExpense!.cents,0):null;
+ const estimatedExpenseCents=latest?.action==='set'?null:previous?applyFullClosures(projection.sales,[previous]).filter(sale=>sale.accountId===parsed.data.accountId&&sale.date.slice(0,7)===parsed.data.month&&sale.fullExpense?.state==='estimated').reduce((sum,sale)=>sum+sale.fullExpense!.cents,0):null;
  return Response.json({accountId:parsed.data.accountId,month:parsed.data.month,preview,latest,history,previousUnitRateCents,estimatedExpenseCents},{headers:{'Cache-Control':'private, no-store'}});
  }catch(error){return errorResponse(error)}
 }
