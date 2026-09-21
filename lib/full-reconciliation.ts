@@ -8,6 +8,8 @@ export type FullPreview={eligible:Sale[];excluded:{saleId:string;reason:string}[
 
 function saleMonth(date:string){return date.slice(0,7);}
 function positiveInteger(value:number|null):value is number{return Number.isSafeInteger(value)&&value!==null&&value>0;}
+export function estimateFullExpenseCents(totalExpenseCents:number,eligibleUnits:number,saleUnits:number){return Math.round(totalExpenseCents/eligibleUnits*saleUnits);}
+export function selectedFullPreview<T extends {accountId:string;month:string}>(data:T|null,accountId:string,month:string):T|null{return data?.accountId===accountId&&data.month===month?data:null;}
 
 export function previewFullMonth(sales:Sale[],_costs:CostRecord[],accountId:string,month:string):FullPreview{
  const eligible:Sale[]=[];
@@ -31,8 +33,8 @@ export function previewFullMonth(sales:Sale[],_costs:CostRecord[],accountId:stri
 export function fullMonthSource(preview:FullPreview,costs:CostRecord[]):string{
  const sales=preview.eligible.map(sale=>{
   const selectedCost=calculateSale(sale,costs).cost;
-  const manualFullExpenseCents=sale.reconciliation?.state==='manual'&&(sale.reconciliation.amounts?.fullExpenseCents??0)>0?sale.reconciliation.amounts!.fullExpenseCents:null;
-  return {id:sale.id,date:sale.date,units:sale.costQuantity,operation:{channel:sale.operation?.channel??'unknown',source:sale.operation?.source??'unknown',logisticType:sale.logisticType??null},sourceStamp:sale.sourceStamp??null,costId:selectedCost?.id??null,manualFullExpenseCents};
+  const manualAmounts=sale.reconciliation?.state==='manual'?sale.reconciliation.amounts??null:null;
+  return {id:sale.id,date:sale.date,units:sale.costQuantity,operation:{channel:sale.operation?.channel??'unknown',source:sale.operation?.source??'unknown',logisticType:sale.logisticType??null},sourceStamp:sale.sourceStamp??null,costId:selectedCost?.id??null,manualAmounts};
  });
  return JSON.stringify({sales});
 }
@@ -81,7 +83,7 @@ export function applyFullClosures(sales:Sale[],closures:FullClosure[]):Sale[]{
   const previous=usable.filter(closure=>closure.accountId===sale.accountId&&closure.month<month).sort((a,b)=>b.month.localeCompare(a.month))[0];
   if(!previous||previous.totalExpenseCents===null)return sale;
   const unitRate=previous.totalExpenseCents/previous.eligibleUnits;
-  sale.fullExpense={cents:Math.round(unitRate*sale.costQuantity),state:'estimated',month,unitRateCents:Math.round(unitRate)};
+  sale.fullExpense={cents:estimateFullExpenseCents(previous.totalExpenseCents,previous.eligibleUnits,sale.costQuantity),state:'estimated',month,unitRateCents:Math.round(unitRate)};
   return sale;
  });
 }

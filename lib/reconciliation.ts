@@ -64,12 +64,13 @@ function latestEvents(events:ReconciliationEvent[]){
  return [...latest.values()];
 }
 
-export function activeProductLink(events:ReconciliationEvent[],sale:Sale){
+function productLinks(events:ReconciliationEvent[],sale:Sale){
  if(!sale.itemId)return undefined;
  const target=productTargetKey(sale.itemId,sale.variationId);
- return latestEvents(events).filter(event=>event.accountId===sale.accountId&&event.targetType==='product'&&event.targetKey===target&&event.validFrom<=sale.date&&event.action==='set'&&event.payload?.kind==='product')
-  .sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.revision-a.revision)[0];
+ return latestEvents(events).filter(event=>event.accountId===sale.accountId&&event.targetType==='product'&&event.targetKey===target&&event.action==='set'&&event.payload?.kind==='product');
 }
+export function activeProductLink(events:ReconciliationEvent[],sale:Sale){return productLinks(events,sale)?.filter(event=>event.validFrom<=sale.date).sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.revision-a.revision)[0];}
+export function latestProductLink(events:ReconciliationEvent[],sale:Sale){return productLinks(events,sale)?.sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.revision-a.revision)[0];}
 
 export function applyReconciliation(sales:Sale[],costs:CostRecord[],events:ReconciliationEvent[]):Sale[]{
  const latest=latestEvents(events);

@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {database,digest,errorResponse,HttpError,owner} from '@/lib/server';
 import type {CostRecord,Sale} from '@/lib/finance';
 import {loadFullClosures,saveFullClosure} from '@/lib/full-closure-store';
-import {fullMonthSource,previewFullMonth} from '@/lib/full-reconciliation';
+import {applyFullClosures,fullMonthSource,previewFullMonth} from '@/lib/full-reconciliation';
 import {applyReconciliation,reconciliationEventsFromRows,type ReconciliationEventRow} from '@/lib/reconciliation';
 
 const accountId=z.string().uuid();
@@ -49,7 +49,8 @@ export async function GET(request:Request){try{
   if(candidate.sourceStamp===source){previous=candidate;break;}
  }
  const previousUnitRateCents=previous?Math.round(previous.totalExpenseCents!/previous.eligibleUnits):null;
- return Response.json({preview,latest,history,previousUnitRateCents},{headers:{'Cache-Control':'private, no-store'}});
+ const estimatedExpenseCents=previous?applyFullClosures(projection.sales,[previous]).filter(sale=>sale.accountId===parsed.data.accountId&&sale.date.slice(0,7)===parsed.data.month&&sale.fullExpense?.state==='estimated').reduce((sum,sale)=>sum+sale.fullExpense!.cents,0):null;
+ return Response.json({accountId:parsed.data.accountId,month:parsed.data.month,preview,latest,history,previousUnitRateCents,estimatedExpenseCents},{headers:{'Cache-Control':'private, no-store'}});
  }catch(error){return errorResponse(error)}
 }
 

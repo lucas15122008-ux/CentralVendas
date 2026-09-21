@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {CostRecord,Sale} from '../lib/finance.ts';
-import {allocateFullMonth,applyFullClosures,fullMonthSource,parseBrlCents,previewFullMonth,type FullClosure} from '../lib/full-reconciliation.ts';
+import {allocateFullMonth,applyFullClosures,estimateFullExpenseCents,fullMonthSource,parseBrlCents,previewFullMonth,selectedFullPreview,type FullClosure} from '../lib/full-reconciliation.ts';
 
 const cost:CostRecord={id:'cost-64265',accountId:'a',sku:'64265',description:'Radiador',unitCost:100,taxValue:0,taxType:'unit',taxTreatment:'included',validFrom:'2026-01-01',importedAt:'2026-01-01T00:00:00Z',importId:'i'};
 const sale=(id:string,overrides:Partial<Sale>={}):Sale=>({
@@ -76,6 +76,20 @@ test('retrato mensal muda quando surge despesa Full individual',()=>{
  assert.notEqual(fullMonthSource(original,[cost]),fullMonthSource(adjusted,[cost]));
 });
 
+test('retrato mensal muda quando o custo manual da venda é revisado',()=>{
+ const amounts={revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:0};
+ const original=previewFullMonth([sale('manual-cost',{reconciliation:{state:'manual',channel:'full',amounts}})],[cost],'a','2026-09');
+ const adjusted=previewFullMonth([sale('manual-cost',{reconciliation:{state:'manual',channel:'full',amounts:{...amounts,costCents:9000}}})],[cost],'a','2026-09');
+ assert.notEqual(fullMonthSource(original,[cost]),fullMonthSource(adjusted,[cost]));
+});
+
+test('prévia carregada só pode ser usada na conta e no mês correspondentes',()=>{
+ const data={accountId:'a',month:'2026-09',preview:previewFullMonth([sale('same')],[cost],'a','2026-09')};
+ assert.equal(selectedFullPreview(data,'a','2026-09'),data);
+ assert.equal(selectedFullPreview(data,'b','2026-09'),null);
+ assert.equal(selectedFullPreview(data,'a','2026-10'),null);
+});
+
 test('valores monetários brasileiros viram centavos somente quando exatos',()=>{
  assert.equal(parseBrlCents('R$ 10.000,00'),1_000_000);
  assert.equal(parseBrlCents('0,01'),1);
@@ -90,6 +104,10 @@ test('último fechamento anterior estima o mês aberto por unidade',()=>{
  const august=closure({id:'aug',month:'2026-08',totalExpenseCents:10_000,eligibleUnits:10});
  const [projected]=applyFullClosures([sale('sep',{costQuantity:2})],[august]);
  assert.deepEqual(projected.fullExpense,{cents:2_000,state:'estimated',month:'2026-09',unitRateCents:1_000});
+});
+
+test('estimativa arredonda depois de multiplicar as unidades',()=>{
+ assert.equal(estimateFullExpenseCents(100,3,300),10_000);
 });
 
 test('estimativa do mês aberto preserva despesa Full individual',()=>{

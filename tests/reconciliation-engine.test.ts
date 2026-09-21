@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {CostRecord,Sale} from '../lib/finance.ts';
-import {activeProductLink,applyReconciliation,initialReconciliationAmounts,productTargetKey,reconciliationStatus,resolveOperation,saleSourceStamp,type ReconciliationEvent} from '../lib/reconciliation.ts';
+import {activeProductLink,applyReconciliation,initialReconciliationAmounts,latestProductLink,productTargetKey,reconciliationStatus,resolveOperation,saleSourceStamp,type ReconciliationEvent} from '../lib/reconciliation.ts';
 
 const sale:Sale={id:'a:1:0',orderId:'1',accountId:'a',sku:'SEM-SKU',itemId:'MLB1',variationId:'V1',title:'Radiador',date:'2026-09-17',quantity:1,costQuantity:1,revenueCents:25000,grossSalesCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,status:'paid'};
 const cost:CostRecord={id:'c',accountId:'a',sku:'64265',description:'Radiador',unitCost:100,taxValue:0,taxType:'unit',taxTreatment:'included',validFrom:'2026-09-15',importedAt:'2026-09-15',importId:'i'};
@@ -48,6 +48,12 @@ test('vínculo ativo preserva a classificação do anúncio',()=>{
  const full=event({payload:{kind:'product',sku:'64265',channel:'full'}});
  assert.equal(activeProductLink([full],sale)?.payload?.kind,'product');
  assert.equal(activeProductLink([full],sale)?.payload?.channel,'full');
+});
+
+test('cadastro do anúncio encontra a regra mais recente mesmo antes de uma nova venda',()=>{
+ const future=event({validFrom:'2026-09-21',payload:{kind:'product',sku:'64265',channel:'full'}});
+ assert.equal(activeProductLink([future],sale),undefined);
+ assert.equal(latestProductLink([future],sale)?.payload?.channel,'full');
 });
 
 test('maior revisão prevalece e o histórico pode chegar fora de ordem',()=>{

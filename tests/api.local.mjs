@@ -123,7 +123,7 @@ test('fechamento Full: prévia, rateio, revisão, conflito e rollback',async()=>
  const month='2026-09';
  const postClosure=(body,headers={})=>call('/api/full-closures',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
  let preview=await call(`/api/full-closures?accountId=${fixtureAccount}&month=${month}`);assert.equal(preview.status,200);
- let data=await preview.json();assert.equal(data.preview.units,2);assert.equal(data.preview.eligible.length,1);assert.equal(data.preview.excluded.length,2);assert.equal(data.latest,null);
+ let data=await preview.json();assert.equal(data.accountId,fixtureAccount);assert.equal(data.month,month);assert.equal(data.preview.units,2);assert.equal(data.preview.eligible.length,1);assert.equal(data.preview.excluded.length,2);assert.equal(data.latest,null);assert.equal(data.estimatedExpenseCents,null);
  const requestId=crypto.randomUUID();
  const close={action:'set',requestId,accountId:fixtureAccount,month,expectedRevision:0,totalExpenseCents:101,reason:'Demonstrativo Full setembro'};
  const saved=await postClosure(close);assert.equal(saved.status,201);let result=await saved.json();assert.equal(result.event.revision,1);assert.equal(result.event.allocations.length,1);assert.equal(result.event.allocations[0].expenseCents,101);
