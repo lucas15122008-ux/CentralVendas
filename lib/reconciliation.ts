@@ -64,12 +64,17 @@ function latestEvents(events:ReconciliationEvent[]){
  return [...latest.values()];
 }
 
+export function activeProductLink(events:ReconciliationEvent[],sale:Sale){
+ if(!sale.itemId)return undefined;
+ const target=productTargetKey(sale.itemId,sale.variationId);
+ return latestEvents(events).filter(event=>event.accountId===sale.accountId&&event.targetType==='product'&&event.targetKey===target&&event.validFrom<=sale.date&&event.action==='set'&&event.payload?.kind==='product')
+  .sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.revision-a.revision)[0];
+}
+
 export function applyReconciliation(sales:Sale[],costs:CostRecord[],events:ReconciliationEvent[]):Sale[]{
  const latest=latestEvents(events);
  return sales.map(original=>{
-  const target=original.itemId?productTargetKey(original.itemId,original.variationId):null;
-  const link=target?latest.filter(event=>event.accountId===original.accountId&&event.targetType==='product'&&event.targetKey===target&&event.validFrom<=original.date&&event.action==='set'&&event.payload?.kind==='product')
-   .sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.revision-a.revision)[0]:undefined;
+  const link=activeProductLink(latest,original);
   let sale:Sale={...original};
   if(link?.payload?.kind==='product')sale={...sale,costSku:link.payload.sku,linkRevision:link.revision,linkValidFrom:link.validFrom};
   const adjustment=latest.find(event=>event.accountId===original.accountId&&event.targetType==='sale'&&event.targetKey===original.id&&event.validFrom==='');
@@ -77,7 +82,9 @@ export function applyReconciliation(sales:Sale[],costs:CostRecord[],events:Recon
   const stamp=saleSourceStamp(sale,cost);
   sale={...sale,sourceStamp:stamp,saleRevision:adjustment?.revision??0};
   if(adjustment?.action==='set'&&adjustment.payload?.kind==='sale'){
-   sale.reconciliation={state:adjustment.sourceStamp===stamp?'manual':'stale',channel:adjustment.payload.channel,amounts:adjustment.payload.amounts};
+   const legacyStamp=sale.logisticType==null?(()=>{const source=JSON.parse(stamp) as {sale:Record<string,unknown>};delete source.sale.logisticType;return JSON.stringify(source)})():null;
+   const validStamp=adjustment.sourceStamp===stamp||legacyStamp!==null&&adjustment.sourceStamp===legacyStamp;
+   sale.reconciliation={state:validStamp?'manual':'stale',channel:adjustment.payload.channel,amounts:adjustment.payload.amounts};
   }
   const manualChannel=sale.reconciliation?.state==='manual'?sale.reconciliation.channel:'unknown';
   const productChannel=link?.payload?.kind==='product'?link.payload.channel??'unknown':'unknown';

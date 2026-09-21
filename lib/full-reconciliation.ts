@@ -31,7 +31,8 @@ export function previewFullMonth(sales:Sale[],_costs:CostRecord[],accountId:stri
 export function fullMonthSource(preview:FullPreview,costs:CostRecord[]):string{
  const sales=preview.eligible.map(sale=>{
   const selectedCost=calculateSale(sale,costs).cost;
-  return {id:sale.id,date:sale.date,units:sale.costQuantity,operation:{channel:sale.operation?.channel??'unknown',source:sale.operation?.source??'unknown',logisticType:sale.logisticType??null},sourceStamp:sale.sourceStamp??null,costId:selectedCost?.id??null};
+  const manualFullExpenseCents=sale.reconciliation?.state==='manual'&&(sale.reconciliation.amounts?.fullExpenseCents??0)>0?sale.reconciliation.amounts!.fullExpenseCents:null;
+  return {id:sale.id,date:sale.date,units:sale.costQuantity,operation:{channel:sale.operation?.channel??'unknown',source:sale.operation?.source??'unknown',logisticType:sale.logisticType??null},sourceStamp:sale.sourceStamp??null,costId:selectedCost?.id??null,manualFullExpenseCents};
  });
  return JSON.stringify({sales});
 }
@@ -76,6 +77,7 @@ export function applyFullClosures(sales:Sale[],closures:FullClosure[]):Sale[]{
    }
   }
   if(sale.status!=='paid'||sale.operation?.channel!=='full'||!positiveInteger(sale.costQuantity))return sale;
+  if(sale.reconciliation?.state==='manual'&&(sale.reconciliation.amounts?.fullExpenseCents??0)>0)return sale;
   const previous=usable.filter(closure=>closure.accountId===sale.accountId&&closure.month<month).sort((a,b)=>b.month.localeCompare(a.month))[0];
   if(!previous||previous.totalExpenseCents===null)return sale;
   const unitRate=previous.totalExpenseCents/previous.eligibleUnits;

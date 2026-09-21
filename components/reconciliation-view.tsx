@@ -6,7 +6,7 @@ import {Textarea} from '@/components/ui/textarea';
 import {Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle} from '@/components/ui/dialog';
 import {DataTable,Choice} from './commerce-controls';
 import {calculateSale,money,summarizeSales,type CostRecord,type ReconciliationAmounts,type Sale,type SaleResult} from '@/lib/finance';
-import {initialReconciliationAmounts,productTargetKey,reconciliationStatus,type ReconciliationEvent} from '@/lib/reconciliation';
+import {activeProductLink,initialReconciliationAmounts,productTargetKey,reconciliationStatus,type ReconciliationEvent} from '@/lib/reconciliation';
 import type {Account} from '@/lib/demo';
 import {businessDate} from '@/lib/dates';
 import {CheckCircle2,ClipboardCheck,History,Link2,LoaderCircle,Package,RefreshCw,Search,TriangleAlert,Unlink} from 'lucide-react';
@@ -51,6 +51,7 @@ function ReconciliationEditor({sale,costs,events,account,demo,onReload,onClose}:
  const accountCosts=useMemo(()=>Object.values(costs.filter(cost=>cost.accountId===sale.accountId).sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.importedAt.localeCompare(a.importedAt)).reduce((all,cost)=>{if(!all[cost.sku])all[cost.sku]=cost;return all},{} as Record<string,CostRecord>)).sort((a,b)=>a.sku.localeCompare(b.sku,'pt-BR')),[costs,sale.accountId]);
  const defaultLinkDate=sale.linkValidFrom??accountCosts.find(cost=>cost.sku===(sale.costSku??sale.sku))?.validFrom??businessDate();const [linkSku,setLinkSku]=useState(sale.costSku??'');const [linkDate,setLinkDate]=useState(defaultLinkDate);
  const target=sale.itemId?productTargetKey(sale.itemId,sale.variationId):null;
+ const currentLink=activeProductLink(events,sale);const linkChannel=currentLink?.payload?.kind==='product'?currentLink.payload.channel??'unknown':'unknown';
  const linkRevision=events.filter(event=>event.accountId===sale.accountId&&event.targetType==='product'&&event.targetKey===target&&event.validFrom===linkDate).reduce((revision,event)=>Math.max(revision,event.revision),0);
  const history=events.filter(event=>event.accountId===sale.accountId&&(event.targetType==='sale'&&event.targetKey===sale.id||!!target&&event.targetType==='product'&&event.targetKey===target)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)||b.revision-a.revision);
  async function send(body:object,kind:'sale'|'link'|'clear'){
@@ -58,7 +59,7 @@ function ReconciliationEditor({sale,costs,events,account,demo,onReload,onClose}:
  }
  async function saveLink(action:'set'|'clear'){
   if(!sale.itemId)return;if(reason.trim().length<3){setError('Explique o motivo da alteração.');return;}if(action==='set'&&!linkSku){setError('Selecione um SKU da planilha.');return;}
-  await send({kind:'product',action,requestId:crypto.randomUUID(),accountId:sale.accountId,itemId:sale.itemId,variationId:sale.variationId??null,validFrom:linkDate,expectedRevision:linkRevision,...(action==='set'?{sku:linkSku}:{}),reason:reason.trim()},action==='set'?'link':'clear');
+  await send({kind:'product',action,requestId:crypto.randomUUID(),accountId:sale.accountId,itemId:sale.itemId,variationId:sale.variationId??null,validFrom:linkDate,expectedRevision:linkRevision,...(action==='set'?{sku:linkSku,channel:linkChannel}:{}),reason:reason.trim()},action==='set'?'link':'clear');
  }
  async function saveSale(action:'set'|'clear'){
   if(reason.trim().length<3){setError('Explique o motivo da alteração.');return;}if(action==='clear'){await send({kind:'sale',action,requestId:crypto.randomUUID(),accountId:sale.accountId,saleId:sale.id,expectedRevision:sale.saleRevision??0,reason:reason.trim()},'clear');return;}

@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type {CostRecord,Sale} from '../lib/finance.ts';
-import {applyReconciliation,initialReconciliationAmounts,productTargetKey,reconciliationStatus,resolveOperation,saleSourceStamp,type ReconciliationEvent} from '../lib/reconciliation.ts';
+import {activeProductLink,applyReconciliation,initialReconciliationAmounts,productTargetKey,reconciliationStatus,resolveOperation,saleSourceStamp,type ReconciliationEvent} from '../lib/reconciliation.ts';
 
 const sale:Sale={id:'a:1:0',orderId:'1',accountId:'a',sku:'SEM-SKU',itemId:'MLB1',variationId:'V1',title:'Radiador',date:'2026-09-17',quantity:1,costQuantity:1,revenueCents:25000,grossSalesCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,status:'paid'};
 const cost:CostRecord={id:'c',accountId:'a',sku:'64265',description:'Radiador',unitCost:100,taxValue:0,taxType:'unit',taxTreatment:'included',validFrom:'2026-09-15',importedAt:'2026-09-15',importId:'i'};
@@ -32,6 +32,22 @@ test('ajuste manual só entra quando o retrato da venda e do custo continua igua
  const [stale]=applyReconciliation([sale],[cost,changedCost],[link,adjustment]);
  assert.equal(stale.reconciliation?.state,'stale');
  assert.equal(stale.reconciliation?.amounts?.fullExpenseCents,1500);
+});
+
+test('ajuste anterior ao campo de logística continua válido quando a fonte não informou modalidade',()=>{
+ const link=event({});
+ const [linked]=applyReconciliation([{...sale,logisticType:null}],[cost],[link]);
+ const legacySource=JSON.parse(saleSourceStamp(linked,cost)) as {sale:Record<string,unknown>;cost:Record<string,unknown>};
+ delete legacySource.sale.logisticType;
+ const adjustment=event({id:'legacy-adjustment',targetType:'sale',targetKey:sale.id,validFrom:'',payload:{kind:'sale',channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:0}},sourceStamp:JSON.stringify(legacySource)});
+ assert.equal(applyReconciliation([{...sale,logisticType:null}],[cost],[link,adjustment])[0].reconciliation?.state,'manual');
+ assert.equal(applyReconciliation([{...sale,logisticType:'fulfillment'}],[cost],[link,adjustment])[0].reconciliation?.state,'stale');
+});
+
+test('vínculo ativo preserva a classificação do anúncio',()=>{
+ const full=event({payload:{kind:'product',sku:'64265',channel:'full'}});
+ assert.equal(activeProductLink([full],sale)?.payload?.kind,'product');
+ assert.equal(activeProductLink([full],sale)?.payload?.channel,'full');
 });
 
 test('maior revisão prevalece e o histórico pode chegar fora de ordem',()=>{

@@ -18,13 +18,15 @@ export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
   const projectedFull=sale.fullExpense?.cents;
   if(sale.reconciliation?.state==='manual'&&sale.reconciliation.amounts){
     const a=sale.reconciliation.amounts;
-    const fullExpenseCents=projectedFull??a.fullExpenseCents;
+    const keepsManualFull=(a.fullExpenseCents??0)>0&&sale.fullExpense?.state!=='closed';
+    const fullExpenseCents=keepsManualFull?a.fullExpenseCents:projectedFull??a.fullExpenseCents;
     const effective={...a,fullExpenseCents};
     const labels:Record<keyof ReconciliationAmounts,string>={revenueCents:'Receita líquida',feeCents:'Tarifa',shippingCents:'Frete',otherCents:'Outras despesas',costCents:'Custo consumido',taxCents:'Imposto adicional',fullExpenseCents:'Despesa adicional Full'};
     const reasons=Object.entries(labels).filter(([key])=>effective[key as keyof ReconciliationAmounts]===null).map(([,label])=>label+' não confirmado');
     if(sale.fullClosureState==='stale')reasons.push('O fechamento Full mudou: revise o mês');
     const contributionCents=reasons.length?null:effective.revenueCents!-effective.feeCents!-effective.shippingCents!-effective.otherCents!-effective.costCents!-effective.taxCents!-effective.fullExpenseCents!;
-    return {...sale,...effective,cost,contributionCents,margin:contributionCents!==null&&effective.revenueCents!>0?contributionCents/effective.revenueCents!*100:null,reasons,resultState:resultState(sale,reasons)};
+    const effectiveSale=keepsManualFull?{...sale,fullExpense:undefined}:sale;
+    return {...effectiveSale,...effective,cost,contributionCents,margin:contributionCents!==null&&effective.revenueCents!>0?contributionCents/effective.revenueCents!*100:null,reasons,resultState:resultState(effectiveSale,reasons)};
   }
   const reasons:string[]=[...(sale.sourceIssues??[])];
   if(sale.reconciliation?.state==='stale')reasons.push('A venda ou seu custo mudou: revise o ajuste manual');

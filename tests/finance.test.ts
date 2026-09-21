@@ -40,6 +40,10 @@ test('despesa Full manual positiva vale antes do fechamento',()=>{
  const result=calculateSale({...sale,reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:20000,feeCents:3000,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:750}}},[cost]);
  assert.equal(result.contributionCents,5250);assert.equal(result.resultState,'manual');
 });
+test('estimativa mensal não substitui despesa Full manual positiva',()=>{
+ const result=calculateSale({...sale,reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:20000,feeCents:3000,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:750}},fullExpense:{cents:1000,state:'estimated',month:'2026-09',unitRateCents:500}},[cost]);
+ assert.equal(result.fullExpenseCents,750);assert.equal(result.contributionCents,5250);assert.equal(result.resultState,'manual');
+});
 test('fechamento Full desatualizado impede contribuição',()=>{
  const result=calculateSale({...sale,operation:{channel:'full',source:'product'},fullClosureState:'stale'},[cost]);
  assert.equal(result.contributionCents,null);assert.equal(result.resultState,'stale');

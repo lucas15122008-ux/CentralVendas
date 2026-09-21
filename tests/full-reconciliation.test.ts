@@ -70,6 +70,12 @@ test('retrato mensal é estável e muda com fonte ou custo selecionado',()=>{
  assert.notEqual(fullMonthSource(first,[cost]),fullMonthSource(first,[{...cost,id:'new-cost'}]));
 });
 
+test('retrato mensal muda quando surge despesa Full individual',()=>{
+ const original=previewFullMonth([sale('manual')],[cost],'a','2026-09');
+ const adjusted=previewFullMonth([sale('manual',{reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:500}}})],[cost],'a','2026-09');
+ assert.notEqual(fullMonthSource(original,[cost]),fullMonthSource(adjusted,[cost]));
+});
+
 test('valores monetários brasileiros viram centavos somente quando exatos',()=>{
  assert.equal(parseBrlCents('R$ 10.000,00'),1_000_000);
  assert.equal(parseBrlCents('0,01'),1);
@@ -84,6 +90,13 @@ test('último fechamento anterior estima o mês aberto por unidade',()=>{
  const august=closure({id:'aug',month:'2026-08',totalExpenseCents:10_000,eligibleUnits:10});
  const [projected]=applyFullClosures([sale('sep',{costQuantity:2})],[august]);
  assert.deepEqual(projected.fullExpense,{cents:2_000,state:'estimated',month:'2026-09',unitRateCents:1_000});
+});
+
+test('estimativa do mês aberto preserva despesa Full individual',()=>{
+ const august=closure({id:'aug',month:'2026-08',totalExpenseCents:10_000,eligibleUnits:10});
+ const manual=sale('sep',{costQuantity:2,reconciliation:{state:'manual',channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:750}}});
+ const [projected]=applyFullClosures([manual],[august]);
+ assert.equal(projected.fullExpense,undefined);
 });
 
 test('fechamento atual substitui estimativa e a maior revisão prevalece',()=>{

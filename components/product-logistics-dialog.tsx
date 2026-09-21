@@ -6,7 +6,7 @@ import {Textarea} from '@/components/ui/textarea';
 import {DialogContent,DialogDescription,DialogHeader,DialogTitle} from '@/components/ui/dialog';
 import {Choice} from './commerce-controls';
 import {money,type CostRecord,type Sale,type SalesChannel} from '@/lib/finance';
-import {productTargetKey,type ReconciliationEvent} from '@/lib/reconciliation';
+import {activeProductLink,productTargetKey,type ReconciliationEvent} from '@/lib/reconciliation';
 import type {Account} from '@/lib/demo';
 import {businessDate} from '@/lib/dates';
 import {LoaderCircle,PackageCheck,Save,TriangleAlert} from 'lucide-react';
@@ -14,7 +14,6 @@ import {toast} from 'sonner';
 
 const channelLabel:Record<SalesChannel,string>={unknown:'Detectar pelo Mercado Livre',full:'Mercado Livre Full',other:'Venda comum'};
 const sourceLabel={meli:'Mercado Livre',manual:'Ajuste da venda',product:'Configuração do anúncio',unknown:'Sem classificação'} as const;
-function activeProductLink(events:ReconciliationEvent[],sale:Sale){if(!sale.itemId)return undefined;const target=productTargetKey(sale.itemId,sale.variationId);const latestByDate=new Map<string,ReconciliationEvent>();for(const event of events.filter(row=>row.accountId===sale.accountId&&row.targetType==='product'&&row.targetKey===target)){const saved=latestByDate.get(event.validFrom);if(!saved||event.revision>saved.revision)latestByDate.set(event.validFrom,event);}return [...latestByDate.values()].filter(event=>event.validFrom<=sale.date&&event.action==='set'&&event.payload?.kind==='product').sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.revision-a.revision)[0];}
 
 export function ProductLogisticsDialog({account,sku,sales,costs,events,demo,onReload,onClose,onReturnFocus}:{account?:Account;sku:string;sales:Sale[];costs:CostRecord[];events:ReconciliationEvent[];demo:boolean;onReload:()=>Promise<void>;onClose:()=>void;onReturnFocus:()=>void}){
  const offers=useMemo(()=>{const map=new Map<string,Sale>();for(const sale of sales.filter(row=>row.accountId===account?.id&&row.sku===sku&&row.itemId)){const key=productTargetKey(sale.itemId!,sale.variationId);const current=map.get(key);if(!current||sale.date>current.date)map.set(key,sale);}return [...map.values()].sort((a,b)=>(a.itemId??'').localeCompare(b.itemId??'')||(a.variationId??'').localeCompare(b.variationId??''));},[account?.id,sales,sku]);
