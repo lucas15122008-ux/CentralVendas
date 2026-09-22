@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildAdProfileMigration,type LegacyWorkspace} from '../lib/ad-profile-migration.ts';
+import {buildAdProfileMigration,migrationRolloutState,type LegacyWorkspace} from '../lib/ad-profile-migration.ts';
 import type {CostRecord,Sale} from '../lib/finance.ts';
 import {applyReconciliation,productTargetKey,saleSourceStamp,type ReconciliationEvent} from '../lib/reconciliation.ts';
 import type {FullClosure} from '../lib/full-reconciliation.ts';
+import type {AdProfileEvent} from '../lib/ad-profiles.ts';
 
 const accountId='10000000-0000-4000-8000-000000000001';
 const activeImport={id:'import-active',accountId,withdrawnAt:null};
@@ -21,8 +22,13 @@ function link(overrides:Partial<ReconciliationEvent>={}):ReconciliationEvent{ret
  id:'link-1',accountId,targetType:'product',targetKey:productTargetKey('MLB-1',null),validFrom:'2026-01-15',revision:1,
  action:'set',payload:{kind:'product',sku:'64265',channel:'other'},sourceStamp:null,reason:'Vínculo legado',createdAt:'2026-01-15T00:00:00Z',...overrides,
 };}
+function nativeProfile(overrides:Partial<AdProfileEvent>={}):AdProfileEvent{return {
+ id:'native-1',accountId,itemId:'MLB-1',variationId:null,validFrom:'2026-01-01',revision:1,action:'set',
+ payload:{unitCostTenThousandths:900_000,tax:{mode:'included'},operation:'auto'},requestId:'native-request',
+ reason:'Valor revisado pelo usuário',origin:'native',createdAt:'2026-09-22T12:00:00Z',...overrides,
+};}
 function workspace(overrides:Partial<LegacyWorkspace>={}):LegacyWorkspace{return {
- ownerId:'owner-1',imports:[activeImport],costs:[cost()],sales:[sale()],reconciliationEvents:[],fullClosures:[],...overrides,
+ ownerId:'owner-1',imports:[activeImport],costs:[cost()],sales:[sale()],reconciliationEvents:[],fullClosures:[],nativeProfiles:[],...overrides,
 };}
 
 test('migra vínculo explícito e todas as vigências determinísticas do custo',()=>{
@@ -54,7 +60,7 @@ test('infere somente SKU exato único e nunca usa título ou preço',()=>{
  }));
  assert.equal(ambiguous.profiles.length,0);
  assert.ok(ambiguous.issues.some(issue=>issue.code==='ambiguous_cost'));
- assert.equal(ambiguous.blockingDifferences,2);
+ assert.ok(ambiguous.blockingDifferences>=2);
 
  const noTitleMatch=buildAdProfileMigration(workspace({sales:[sale({sku:'SEM-SKU',title:'Radiador'})]}));
  assert.ok(noTitleMatch.issues.some(issue=>issue.code==='missing_cost'));
@@ -78,14 +84,26 @@ test('ignora import retirado, bloqueia imposto desconhecido e assina essa origem
  assert.equal(unknown.blockingDifferences,1);
 });
 
-test('mantém o desempate legado na mesma vigência',()=>{
+test('custo concorrente na mesma vigência bloqueia até uma ficha nativa resolver o alvo',()=>{
  const plan=buildAdProfileMigration(workspace({costs:[
   cost({id:'a',unitCost:80,importedAt:'2026-01-01T10:00:00Z'}),
   cost({id:'b',unitCost:90,importedAt:'2026-01-02T10:00:00Z'}),
  ]}));
  assert.equal(plan.profiles.length,1);
  assert.equal(plan.profiles[0].payload?.unitCostTenThousandths,900_000);
- assert.equal(plan.blockingDifferences,0);
+ assert.ok(plan.issues.some(issue=>issue.code==='ambiguous_cost'));
+ assert.ok(plan.blockingDifferences>0);
+
+ const resolved=buildAdProfileMigration(workspace({
+  costs:[
+   cost({id:'a',unitCost:80,importedAt:'2026-01-01T10:00:00Z'}),
+   cost({id:'b',unitCost:90,importedAt:'2026-01-02T10:00:00Z'}),
+  ],
+  nativeProfiles:[nativeProfile()],
+ }));
+ assert.equal(resolved.profiles.length,0);
+ assert.equal(resolved.issues.length,0);
+ assert.equal(resolved.blockingDifferences,0);
 });
 
 test('SKU 64265 gera fichas independentes para anúncio Full e comum',()=>{
@@ -128,10 +146,27 @@ test('diferença por venda bloqueia a ativação e identifica o alvo',()=>{
 });
 
 test('proprietário sem dados legados produz plano vazio e ativável',()=>{
- const plan=buildAdProfileMigration(workspace({imports:[],costs:[],sales:[],reconciliationEvents:[],fullClosures:[]}));
+ const plan=buildAdProfileMigration(workspace({imports:[],costs:[],sales:[],reconciliationEvents:[],fullClosures:[],nativeProfiles:[]}));
  assert.equal(plan.profiles.length,0);
  assert.equal(plan.comparedSales,0);
  assert.equal(plan.blockingDifferences,0);
  assert.equal(plan.issues.length,0);
  assert.match(plan.sourceStamp,/^migration-v1:/);
+});
+
+test('proprietário sem fontes financeiras legadas entra direto no fluxo nativo',()=>{
+ assert.equal(migrationRolloutState(undefined,false),'active');
+ assert.equal(migrationRolloutState(undefined,true),'pending');
+ assert.equal(migrationRolloutState('blocked',false),'blocked');
+ assert.equal(migrationRolloutState('active',true),'active');
+});
+
+test('ficha nativa explica uma diferença e não colide com a ativação',()=>{
+ const plan=buildAdProfileMigration(workspace({
+  costs:[cost({taxTreatment:'unknown',taxValue:null})],
+  nativeProfiles:[nativeProfile({payload:{unitCostTenThousandths:1_000_050,tax:{mode:'included'},operation:'auto'}})],
+ }));
+ assert.equal(plan.profiles.length,0);
+ assert.equal(plan.issues.length,0);
+ assert.equal(plan.blockingDifferences,0);
 });

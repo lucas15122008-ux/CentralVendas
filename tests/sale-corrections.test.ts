@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {applySaleCorrections} from '../lib/sale-corrections.ts';
+import {applySaleCorrections,saleCorrectionSourceStamp} from '../lib/sale-corrections.ts';
 import type {SaleCorrectionEvent} from '../lib/sale-corrections.ts';
 import type {Sale} from '../lib/finance.ts';
 
@@ -12,12 +12,13 @@ const sale:Sale={
 };
 
 function correction(overrides:Partial<SaleCorrectionEvent>={}):SaleCorrectionEvent{
- return {
+ const event:SaleCorrectionEvent={
   id:'correction-1',accountId:'account-a',saleId:'sale-1',field:'shippingCents',
   revision:1,action:'set',mode:'fallback',value:1250,sourceValue:null,
-  sourceStamp:'source-a',requestId:'request-1',reason:'Campo ausente na API',
+  sourceStamp:'',requestId:'request-1',reason:'Campo ausente na API',
   createdAt:'2026-09-20T12:00:00.000Z',...overrides,
  };
+ return {...event,sourceStamp:overrides.sourceStamp??saleCorrectionSourceStamp(sale,event.field)};
 }
 
 test('fallback preenche somente campo oficial ausente',()=>{
@@ -31,22 +32,29 @@ test('fallback preenche somente campo oficial ausente',()=>{
  assert.equal(official.correctionState,undefined);
 });
 
-test('override aplica enquanto valor e assinatura oficiais permanecem iguais',()=>{
- const override=correction({field:'feeCents',mode:'override',value:1200,sourceValue:1300});
+test('override aplica enquanto o valor oficial do próprio campo permanece igual',()=>{
+ const override=correction({field:'feeCents',mode:'override',value:1200,sourceValue:1300,sourceStamp:saleCorrectionSourceStamp(sale,'feeCents')});
  const applied=applySaleCorrections(sale,[override]);
+ const unrelated=applySaleCorrections({...sale,shippingCents:600,sourceStamp:'outra-assinatura-global'},[override]);
  assert.equal(applied.feeCents,1200);
  assert.equal(applied.fieldSources?.feeCents,'manual_override');
  assert.equal(applied.correctionState,'corrected');
+ assert.equal(unrelated.feeCents,1200);
+ assert.equal(unrelated.correctionState,'corrected');
 });
 
-test('override fica stale quando valor ou assinatura oficial muda',()=>{
- const override=correction({field:'feeCents',mode:'override',value:1200,sourceValue:1300});
+test('override fica stale quando o valor oficial do próprio campo muda',()=>{
+ const override=correction({field:'feeCents',mode:'override',value:1200,sourceValue:1300,sourceStamp:saleCorrectionSourceStamp(sale,'feeCents')});
  const changedValue=applySaleCorrections({...sale,feeCents:1400},[override]);
- const changedSource=applySaleCorrections({...sale,sourceStamp:'source-b'},[override]);
  assert.equal(changedValue.feeCents,1400);
  assert.equal(changedValue.correctionState,'stale');
- assert.equal(changedSource.feeCents,1300);
- assert.equal(changedSource.correctionState,'stale');
+});
+
+test('assinatura pode ser recalculada com o valor oficial ao editar uma correção aplicada',()=>{
+ const override=correction({field:'feeCents',mode:'override',value:1200,sourceValue:1300,sourceStamp:saleCorrectionSourceStamp(sale,'feeCents')});
+ const applied=applySaleCorrections(sale,[override]);
+ assert.equal(applied.feeCents,1200);
+ assert.equal(saleCorrectionSourceStamp(applied,'feeCents',override.sourceValue),override.sourceStamp);
 });
 
 test('correções são isoladas por venda, conta e campo',()=>{

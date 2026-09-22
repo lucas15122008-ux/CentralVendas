@@ -1,4 +1,4 @@
-import type {AdProfileEvent,AdProfilePayload,OperationOverride,TaxRule} from './ad-profiles.ts';
+import {activeAdProfile,latestAdProfile,type AdProfileEvent,type AdProfilePayload,type OperationOverride,type TaxRule} from './ad-profiles.ts';
 import {applyFullClosures,type FullClosure} from './full-reconciliation.ts';
 import {calculateSale,type CostRecord,type Sale,type SaleResult} from './finance.ts';
 import {activeProductLink,applyReconciliation,reconciliationEventsFromRows,type ReconciliationEvent,type ReconciliationEventRow} from './reconciliation.ts';
@@ -12,6 +12,7 @@ export type LegacyWorkspace={
  sales:Sale[];
  reconciliationEvents:ReconciliationEvent[];
  fullClosures:FullClosure[];
+ nativeProfiles?:AdProfileEvent[];
 };
 export type MigrationIssue={
  accountId:string;itemId:string;variationId:string|null;
@@ -43,7 +44,8 @@ function canonicalSource(input:LegacyWorkspace){
  const sales=input.sales.map(row=>({id:row.id,accountId:row.accountId,itemId:row.itemId??null,variationId:row.variationId??null,sku:row.sku,date:row.date,quantity:row.quantity,costQuantity:row.costQuantity,revenueCents:row.revenueCents,feeCents:row.feeCents,shippingCents:row.shippingCents,otherCents:row.otherCents,status:row.status,logisticType:row.logisticType??null,sourceIssues:row.sourceIssues??[]})).sort((a,b)=>a.id.localeCompare(b.id));
  const reconciliationEvents=input.reconciliationEvents.map(row=>({id:row.id,accountId:row.accountId,targetType:row.targetType,targetKey:row.targetKey,validFrom:row.validFrom,revision:row.revision,action:row.action,payload:row.payload,sourceStamp:row.sourceStamp,createdAt:row.createdAt})).sort((a,b)=>a.id.localeCompare(b.id));
  const fullClosures=input.fullClosures.map(row=>({id:row.id,accountId:row.accountId,month:row.month,revision:row.revision,action:row.action,totalExpenseCents:row.totalExpenseCents,eligibleUnits:row.eligibleUnits,sourceStamp:row.sourceStamp,stale:row.stale??false,allocations:[...row.allocations].sort((a,b)=>a.saleId.localeCompare(b.saleId))})).sort((a,b)=>a.id.localeCompare(b.id));
- return JSON.stringify({ownerId:input.ownerId,imports,costs,sales,reconciliationEvents,fullClosures});
+ const nativeProfiles=(input.nativeProfiles??[]).map(row=>({id:row.id,accountId:row.accountId,itemId:row.itemId,variationId:row.variationId,validFrom:row.validFrom,revision:row.revision,action:row.action,payload:row.payload,requestId:row.requestId,reason:row.reason,createdAt:row.createdAt})).sort((a,b)=>a.id.localeCompare(b.id));
+ return JSON.stringify({ownerId:input.ownerId,imports,costs,sales,reconciliationEvents,fullClosures,nativeProfiles});
 }
 function sourceStamp(input:LegacyWorkspace){return `migration-v1:${stableHash(canonicalSource(input))}`;}
 
@@ -67,6 +69,7 @@ function taxRule(cost:CostRecord):TaxRule|null{
 }
 function operationOverride(channel:string|undefined):OperationOverride{return channel==='full'?'full':channel==='other'?'other':'auto';}
 function samePayload(left:AdProfilePayload|null,right:AdProfilePayload|null){return JSON.stringify(left)===JSON.stringify(right);}
+function costPayload(cost:CostRecord){return JSON.stringify({unitCost:cost.unitCost,taxValue:cost.taxValue,taxType:cost.taxType,taxTreatment:cost.taxTreatment});}
 
 function collectTargets(input:LegacyWorkspace){
  const targets=new Map<string,Target>();
@@ -125,6 +128,10 @@ function targetProfiles(input:LegacyWorkspace,target:Target,costs:CostRecord[],s
    previousPayload=null;
    continue;
   }
+  const concurrent=costs.filter(row=>row.accountId===target.accountId&&row.sku===sku&&row.validFrom===selected.validFrom);
+  if(new Set(concurrent.map(costPayload)).size>1){
+   addIssue(issues,{accountId:target.accountId,itemId:target.itemId,variationId:target.variationId,code:'ambiguous_cost',message:`O SKU ${sku} possui custos diferentes com a mesma vigência em ${selected.validFrom}. Revise a ficha do anúncio.`});
+  }
   const tax=taxRule(selected);
   if(!tax){
    addIssue(issues,{accountId:target.accountId,itemId:target.itemId,variationId:target.variationId,code:'unknown_tax',message:`O imposto do SKU ${sku} não está definido em ${validFrom}.`});
@@ -155,8 +162,16 @@ export function buildAdProfileMigration(input:LegacyWorkspace):MigrationPlan{
  const activeImports=new Set(input.imports.filter(row=>row.withdrawnAt===null).map(row=>row.id));
  const costs=input.costs.filter(row=>activeImports.has(row.importId));
  const issues:MigrationIssue[]=[];
- const profiles=collectTargets(input).flatMap(target=>targetProfiles(input,target,costs,stamp,issues));
+ const targets=collectTargets(input),nativeProfiles=input.nativeProfiles??[];
+ const generatedProfiles=targets.flatMap(target=>targetProfiles(input,target,costs,stamp,issues));
+ const nativeSlots=new Set(nativeProfiles.map(profile=>JSON.stringify([profile.accountId,profile.itemId,profile.variationId,profile.validFrom])));
+ const profiles=generatedProfiles.filter(profile=>!nativeSlots.has(JSON.stringify([profile.accountId,profile.itemId,profile.variationId,profile.validFrom])));
  profiles.sort((a,b)=>a.accountId.localeCompare(b.accountId)||a.itemId.localeCompare(b.itemId)||(a.variationId??'').localeCompare(b.variationId??'')||a.validFrom.localeCompare(b.validFrom));
+ const resolvedTargets=new Set(targets.filter(target=>target.sales.length
+  ?target.sales.every(row=>activeAdProfile(nativeProfiles,row))
+  :!!latestAdProfile(nativeProfiles,target.accountId,target.itemId,target.variationId))
+  .map(target=>targetKey(target.accountId,target.itemId,target.variationId)));
+ const unresolvedIssues=issues.filter(issue=>!resolvedTargets.has(targetKey(issue.accountId,issue.itemId,issue.variationId)));
 
  const legacyReconciled=applyReconciliation(input.sales,costs,input.reconciliationEvents);
  const legacySales=applyFullClosures(legacyReconciled,input.fullClosures);
@@ -166,23 +181,31 @@ export function buildAdProfileMigration(input:LegacyWorkspace):MigrationPlan{
   if(sale.operation?.source==='product')delete sale.operation;
   return sale;
  });
- const migratedSales=applyFullClosures(applyAdProfiles(migrationBase,profiles),input.fullClosures);
- let blockingDifferences=0;
+ const migratedSales=applyFullClosures(applyAdProfiles(migrationBase,[...profiles,...nativeProfiles]),input.fullClosures);
+ let blockingDifferences=unresolvedIssues.filter(issue=>issue.code==='ambiguous_cost').length;
  for(let index=0;index<legacySales.length;index++){
   const legacySale=legacySales[index],migratedSale=migratedSales[index];if(!migratedSale)continue;
   const before=projectionValues(calculateSale(legacySale,costs));
   const after=projectionValues(calculateSale(migratedSale,[]));
-  if(JSON.stringify(before)===JSON.stringify(after))continue;
+  if(JSON.stringify(before)===JSON.stringify(after)||activeAdProfile(nativeProfiles,migrationBase[index]))continue;
   blockingDifferences++;
-  addIssue(issues,{accountId:legacySale.accountId,itemId:legacySale.itemId??'',variationId:legacySale.variationId??null,code:'projection_difference',message:`A venda ${legacySale.orderId} mudaria de ${JSON.stringify(before)} para ${JSON.stringify(after)}.`});
+  addIssue(unresolvedIssues,{accountId:legacySale.accountId,itemId:legacySale.itemId??'',variationId:legacySale.variationId??null,code:'projection_difference',message:`A venda ${legacySale.orderId} mudaria de ${JSON.stringify(before)} para ${JSON.stringify(after)}.`});
  }
- issues.sort((a,b)=>a.accountId.localeCompare(b.accountId)||a.itemId.localeCompare(b.itemId)||(a.variationId??'').localeCompare(b.variationId??'')||a.code.localeCompare(b.code)||a.message.localeCompare(b.message));
- return {sourceStamp:stamp,profiles,issues,comparedSales:legacySales.length,blockingDifferences};
+ unresolvedIssues.sort((a,b)=>a.accountId.localeCompare(b.accountId)||a.itemId.localeCompare(b.itemId)||(a.variationId??'').localeCompare(b.variationId??'')||a.code.localeCompare(b.code)||a.message.localeCompare(b.message));
+ return {sourceStamp:stamp,profiles,issues:unresolvedIssues,comparedSales:legacySales.length,blockingDifferences};
 }
 
 type ImportRow={id:string;accountId:string;withdrawnAt:string|null};
 type OrderRow={data:string};
 type RolloutRow={state:string;sourceStamp:string};
+type NativeProfileRow=Omit<AdProfileEvent,'variationId'|'payload'|'action'|'origin'>&{variationId:string;payload:string|null;action:string;origin:string};
+
+function nativeProfileFromRow(row:NativeProfileRow):AdProfileEvent|null{try{
+ if(row.action!=='set'&&row.action!=='clear'||row.origin!=='native')return null;
+ const payload=row.payload===null?null:JSON.parse(row.payload) as AdProfilePayload;
+ if(row.action==='set'&&!payload)return null;
+ return {...row,variationId:row.variationId===''?null:row.variationId,action:row.action,origin:'native',payload};
+ }catch{return null;}}
 
 export async function loadLegacyWorkspace(db:D1Database,ownerId:string):Promise<LegacyWorkspace>{
  const results=await db.batch([
@@ -190,14 +213,16 @@ export async function loadLegacyWorkspace(db:D1Database,ownerId:string):Promise<
   db.prepare('SELECT id,account_id AS accountId,import_id AS importId,sku,description,unit_cost AS unitCost,tax_value AS taxValue,tax_type AS taxType,tax_treatment AS taxTreatment,valid_from AS validFrom,imported_at AS importedAt FROM cost_versions WHERE owner_id=? ORDER BY account_id,sku,valid_from,imported_at,id').bind(ownerId),
   db.prepare('SELECT data FROM meli_orders WHERE owner_id=? ORDER BY date,order_id,id').bind(ownerId),
   db.prepare('SELECT id,account_id AS accountId,target_type AS targetType,target_key AS targetKey,valid_from AS validFrom,revision,action,payload,source_stamp AS sourceStamp,reason,created_at AS createdAt FROM reconciliation_events WHERE owner_id=? ORDER BY created_at,revision,id').bind(ownerId),
+  db.prepare("SELECT id,account_id AS accountId,item_id AS itemId,variation_id AS variationId,valid_from AS validFrom,revision,action,payload,request_id AS requestId,reason,origin,created_at AS createdAt FROM ad_profile_events WHERE owner_id=? AND origin='native' ORDER BY created_at,revision,id").bind(ownerId),
  ]);
  const imports=results[0].results as unknown as ImportRow[];
  const costs=results[1].results as unknown as CostRecord[];
  const sales=(results[2].results as unknown as OrderRow[]).flatMap(row=>{try{return JSON.parse(row.data) as Sale[];}catch{return [];}});
  const reconciliationEvents=reconciliationEventsFromRows(results[3].results as unknown as ReconciliationEventRow[]);
+ const nativeProfiles=(results[4].results as unknown as NativeProfileRow[]).map(nativeProfileFromRow).filter((event):event is AdProfileEvent=>event!==null);
  const {loadFullClosures}=await import('./full-closure-store.ts');
  const fullClosures=await loadFullClosures(db,ownerId);
- return {ownerId,imports,costs,sales,reconciliationEvents,fullClosures};
+ return {ownerId,imports,costs,sales,reconciliationEvents,fullClosures,nativeProfiles};
 }
 
 async function rollout(db:D1Database,ownerId:string){
@@ -209,10 +234,21 @@ async function persistedProfileCount(db:D1Database,ownerId:string){
 }
 function report(plan:MigrationPlan){return JSON.stringify({profileCount:plan.profiles.length,issueCount:plan.issues.length,issues:plan.issues,comparedSales:plan.comparedSales,blockingDifferences:plan.blockingDifferences});}
 
+export function migrationRolloutState(savedState:string|undefined,hasLegacyFinancialSources:boolean):MigrationRolloutState{
+ if(savedState==='active'||savedState==='blocked')return savedState;
+ return hasLegacyFinancialSources?'pending':'active';
+}
+
+function hasLegacyFinancialSources(workspace:LegacyWorkspace){
+ const activeImports=new Set(workspace.imports.filter(row=>row.withdrawnAt===null).map(row=>row.id));
+ return workspace.costs.some(row=>activeImports.has(row.importId))||workspace.reconciliationEvents.length>0;
+}
+
 export async function getAdProfileMigrationStatus(db:D1Database,ownerId:string):Promise<MigrationStatus>{
- const plan=buildAdProfileMigration(await loadLegacyWorkspace(db,ownerId));
+ const workspace=await loadLegacyWorkspace(db,ownerId),plan=buildAdProfileMigration(workspace);
  const saved=await rollout(db,ownerId);
- const state:MigrationRolloutState=saved?.state==='active'?'active':saved?.state==='blocked'&&saved.sourceStamp===plan.sourceStamp?'blocked':'pending';
+ const savedState=saved?.state==='blocked'&&saved.sourceStamp!==plan.sourceStamp?undefined:saved?.state;
+ const state=migrationRolloutState(savedState,hasLegacyFinancialSources(workspace));
  return {...plan,state,persistedProfileCount:await persistedProfileCount(db,ownerId)};
 }
 

@@ -67,3 +67,7 @@ test('correção obsoleta impede margem e deixa o resultado stale',()=>{
  const result=calculateSale({...sale,operation:{channel:'other',source:'meli'},correctionState:'stale'},[cost]);
  assert.equal(result.contributionCents,null);assert.equal(result.resultState,'stale');assert.ok(result.reasons.some(reason=>/correção/i.test(reason)));
 });
+test('correção válida deixa o resultado identificado como corrigido',()=>{
+ const result=calculateSale({...sale,operation:{channel:'other',source:'meli'},correctionState:'corrected'},[cost]);
+ assert.equal(result.contributionCents,6000);assert.equal(result.resultState,'corrected');
+});

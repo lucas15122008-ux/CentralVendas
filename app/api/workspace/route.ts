@@ -9,7 +9,7 @@ import {saleCorrectionEventFromRow,type SaleCorrectionRow} from '@/lib/sale-corr
 import type {MeliListing} from '@/lib/meli/catalog';
 import {projectSales} from '@/lib/sale-projection';
 import {collectPending} from '@/lib/pending';
-import {getAdProfileMigrationStatus,type MigrationIssue,type MigrationRolloutState} from '@/lib/ad-profile-migration';
+import {getAdProfileMigrationStatus,migrationRolloutState,type MigrationIssue,type MigrationRolloutState} from '@/lib/ad-profile-migration';
 
 type ListingRow=Omit<MeliListing,'variationId'|'hasProfile'>&{variationId:string};
 type RolloutRow={state:string;sourceStamp:string;report:string;activatedAt:string|null;updatedAt:string};
@@ -54,7 +54,7 @@ export async function GET(){try{
   return {...row,variationId,hasProfile:!!latestAdProfile(adProfiles,row.accountId,row.itemId,variationId)};
  });
  const rolloutRow=(results[11].results[0]??null) as RolloutRow|null;
- let rolloutState:MigrationRolloutState=rolloutRow?.state==='active'?'active':rolloutRow?.state==='blocked'?'blocked':'pending';
+ let rolloutState:MigrationRolloutState=migrationRolloutState(rolloutRow?.state,costs.length>0||reconciliationEvents.length>0);
  let rolloutSourceStamp=rolloutRow?.sourceStamp??null,migrationIssues=issuesFromReport(rolloutRow);
  if(rolloutState==='blocked'){
   const current=await getAdProfileMigrationStatus(db,id);rolloutState=current.state;rolloutSourceStamp=current.sourceStamp;

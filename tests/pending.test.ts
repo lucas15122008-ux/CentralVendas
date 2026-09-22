@@ -4,7 +4,7 @@ import {collectPending,sortPendingItems,type PendingItem} from '../lib/pending.t
 import {calculateSale,groupProducts,summarizeSales,type CostRecord,type Sale,type SaleResult} from '../lib/finance.ts';
 import type {MeliListing} from '../lib/meli/catalog.ts';
 import type {AdProfileEvent} from '../lib/ad-profiles.ts';
-import type {SaleCorrectionEvent} from '../lib/sale-corrections.ts';
+import {saleCorrectionSourceStamp,type SaleCorrectionEvent} from '../lib/sale-corrections.ts';
 import type {FullClosure} from '../lib/full-reconciliation.ts';
 import {projectSales} from '../lib/sale-projection.ts';
 import {demoWorkspace} from '../lib/demo.ts';
@@ -88,7 +88,7 @@ test('rollout pendente preserva custo legado e rollout ativo preserva ajuste com
 
 test('correção por campo participa da projeção ativa',()=>{
  const raw=sale({sourceStamp:'source',otherCents:null});
- const correction:SaleCorrectionEvent={id:'correction',accountId,saleId:raw.id,field:'otherCents',revision:1,action:'set',mode:'fallback',value:700,sourceValue:null,sourceStamp:'source',requestId:'request',reason:'Extrato',createdAt:'2026-01-01T00:00:00Z'};
+ const correction:SaleCorrectionEvent={id:'correction',accountId,saleId:raw.id,field:'otherCents',revision:1,action:'set',mode:'fallback',value:700,sourceValue:null,sourceStamp:saleCorrectionSourceStamp(raw,'otherCents'),requestId:'request',reason:'Extrato',createdAt:'2026-01-01T00:00:00Z'};
  const projected=projectSales({rawSales:[raw],legacyCosts:[],reconciliationEvents:[],profiles:[profile()],corrections:[correction],closures:[],rolloutState:'active'});
  assert.equal(projected.sales[0].otherCents,700);assert.equal(projected.sales[0].fieldSources?.otherCents,'manual_fallback');
 });

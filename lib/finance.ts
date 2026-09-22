@@ -7,7 +7,7 @@ export type SalesChannel='full'|'other'|'unknown';
 export type SaleOperation={channel:SalesChannel;source:'meli'|'manual'|'product'|'unknown';conflict?:string};
 export type FinancialField='revenueCents'|'feeCents'|'shippingCents'|'otherCents'|'costQuantity'|'costCents'|'taxCents'|'fullExpenseCents';
 export type Sale = { id:string; orderId:string; accountId:string; sku:string; title:string; date:string; quantity:number; costQuantity:number|null; grossSalesCents?:number|null; revenueCents:number|null; feeCents:number|null; shippingCents:number|null; otherCents:number|null; status:'paid'|'cancelled'|'refunded'|'pending'; source?:'mercadolivre'; sourceIssues?:string[]; itemId?:string; variationId?:string|null;logisticType?:string|null;operation?:SaleOperation;costSku?:string;reconciliation?:{state:'manual'|'stale';channel:SalesChannel;amounts?:ReconciliationAmounts};sourceStamp?:string;saleRevision?:number;linkRevision?:number;linkValidFrom?:string;fullExpense?:{cents:number;state:'estimated'|'closed';month:string;closureId?:string;unitRateCents:number};fullClosureState?:'stale';adProfile?:{eventId:string;revision:number;validFrom:string;unitCostTenThousandths:number;tax:TaxRule};fieldSources?:Partial<Record<FinancialField,FinancialSource>>;correctionState?:'corrected'|'stale';financialMode?:'legacy'|'native' };
-export type ResultState='pending'|'provisional'|'automatic'|'closed'|'manual'|'stale';
+export type ResultState='pending'|'provisional'|'automatic'|'closed'|'manual'|'corrected'|'stale';
 export type SaleResult = Sale & { cost:CostRecord|null; costCents:number|null; taxCents:number|null; fullExpenseCents:number|null; contributionCents:number|null; margin:number|null; reasons:string[];resultState:ResultState };
 function resultState(sale:Sale,reasons:string[]):ResultState{
  if(sale.reconciliation?.state==='stale'||sale.fullClosureState==='stale'||sale.correctionState==='stale')return 'stale';
@@ -15,6 +15,7 @@ function resultState(sale:Sale,reasons:string[]):ResultState{
  if(sale.fullExpense?.state==='estimated')return 'provisional';
  if(sale.fullExpense?.state==='closed')return 'closed';
  if(sale.reconciliation?.state==='manual')return 'manual';
+ if(sale.correctionState==='corrected')return 'corrected';
  return 'automatic';
 }
 export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {

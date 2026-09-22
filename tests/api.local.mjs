@@ -3,6 +3,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {calculateSale} from '../lib/finance.ts';
+import {saleCorrectionSourceStamp} from '../lib/sale-corrections.ts';
 const base=process.env.TEST_BASE_URL??'http://localhost:5173';
 const auth={Cookie:'__sites_local_auth=1',Origin:base};
 const foreignAccount='70000000-0000-4000-8000-000000000001';
@@ -107,8 +108,12 @@ test('migração de fichas: prévia, bloqueio, rollback, fonte, ativação e iso
  preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.state,'blocked');assert.equal(plan.persistedProfileCount,0);
  assert.equal((await call('/api/ad-profile-migration',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://127.0.0.1:5173'},body:JSON.stringify(blockedRequest)})).status,403);
 
- const corrected='codigo;descricao;custo;imposto\nMIG-UNKNOWN;Produto corrigido;40,00;0\n';
- assert.equal((await upload(corrected,{accountId:unknownAccount,validFrom:'2026-01-01'})).status,201);
+ const reviewedProfile=await call('/api/ad-profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+  action:'set',requestId:crypto.randomUUID(),accountId:unknownAccount,itemId:'MLB-MIGRATION-UNKNOWN',variationId:null,
+  validFrom:'2026-01-01',expectedRevision:0,payload:{unitCostTenThousandths:400_000,tax:{mode:'included'},operation:'auto'},
+  reason:'Imposto revisado na ficha do anúncio',
+ })});
+ assert.equal(reviewedProfile.status,201);
  preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.blockingDifferences,0);const beforeRollbackStamp=plan.sourceStamp;
  const failed=await post({requestId:crypto.randomUUID(),expectedSourceStamp:beforeRollbackStamp});assert.equal(failed.status,500);
  preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.state,'pending');assert.equal(plan.persistedProfileCount,0);
@@ -119,7 +124,7 @@ test('migração de fichas: prévia, bloqueio, rollback, fonte, ativação e iso
  assert.equal((await post({requestId:crypto.randomUUID(),expectedSourceStamp:beforeRollbackStamp})).status,409);
  preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.blockingDifferences,0);assert.notEqual(plan.sourceStamp,beforeRollbackStamp);
  const activation={requestId:crypto.randomUUID(),expectedSourceStamp:plan.sourceStamp};
- const activated=await post(activation);assert.equal(activated.status,200);let result=await activated.json();assert.equal(result.state,'active');assert.ok(result.persistedProfileCount>=6);
+ const activated=await post(activation);assert.equal(activated.status,200);let result=await activated.json();assert.equal(result.state,'active');assert.ok(result.persistedProfileCount>=5);
  const replay=await post(activation);assert.equal(replay.status,200);result=await replay.json();assert.equal(result.state,'active');assert.equal(result.persistedProfileCount,(await (await call('/api/ad-profile-migration')).json()).persistedProfileCount);
  const projected=await workspace();assert.equal(projected.rollout.state,'active');assert.ok(projected.adProfiles.length>=6);assert.ok(Array.isArray(projected.saleCorrections));assert.ok(Array.isArray(projected.listings));assert.ok(Array.isArray(projected.pending));
  assert.equal(projected.listings.find(item=>item.itemId==='MLB-QA-COMMON').hasProfile,true);
@@ -176,7 +181,7 @@ test('correções por campo: fonte atual, fallback, revisão e isolamento',async
  const override={
   action:'set',requestId:crypto.randomUUID(),accountId:fixtureAccount,saleId,
   field:'feeCents',expectedRevision:0,mode:'override',value:4900,
-  sourceValue:current.feeCents,sourceStamp:current.sourceStamp,reason:'Tarifa oficial conferida no extrato',
+  sourceValue:current.feeCents,sourceStamp:saleCorrectionSourceStamp(current,'feeCents'),reason:'Tarifa oficial conferida no extrato',
  };
  assert.equal((await post(override,{Origin:'http://127.0.0.1:5173'})).status,403);
  const saved=await post(override);assert.equal(saved.status,201);assert.equal((await saved.json()).event.value,4900);

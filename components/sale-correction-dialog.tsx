@@ -9,7 +9,7 @@ import type {Account} from '@/lib/demo';
 import type {Sale} from '@/lib/finance';
 import {money} from '@/lib/finance';
 import type {PendingItem} from '@/lib/pending';
-import type {CorrectableField,SaleCorrectionEvent} from '@/lib/sale-corrections';
+import {saleCorrectionSourceStamp,type CorrectableField,type SaleCorrectionEvent} from '@/lib/sale-corrections';
 import {correctionMode,formatCorrectionValue,parseCorrectionValue} from '@/lib/sale-correction-form';
 import {History,LoaderCircle,RefreshCw,Save,Trash2} from 'lucide-react';
 import {toast} from 'sonner';
@@ -22,13 +22,13 @@ export function SaleCorrectionDialog({pending,sale,corrections,account,demo,onRe
  const saleEvents=useMemo(()=>corrections.filter(event=>event.accountId===sale.accountId&&event.saleId===sale.id),[corrections,sale]);
  const candidates=useMemo(()=>pending.field?[pending.field]:fields.filter(field=>latestFor(saleEvents,field)?.action==='set'),[pending.field,saleEvents]);
  const [field,setField]=useState<CorrectableField|''>(candidates[0]??'');
- const current=field?latestFor(saleEvents,field):undefined;const sourceValue=field?sale[field]:null;const mode=correctionMode(sourceValue);
+ const current=field?latestFor(saleEvents,field):undefined;const correctionApplied=field&&(sale.fieldSources?.[field]==='manual_fallback'||sale.fieldSources?.[field]==='manual_override');const sourceValue=correctionApplied&&current?.action==='set'?current.sourceValue:field?sale[field]:null;const mode=correctionMode(sourceValue);
  const [value,setValue]=useState(current?.value===null||current?.value===undefined?'':field?formatCorrectionValue(field,current.value):'');const [reason,setReason]=useState('');const [busy,setBusy]=useState<'set'|'clear'|null>(null);const [error,setError]=useState('');
  function changeField(next:string){const selected=next as CorrectableField,set=latestFor(saleEvents,selected);setField(selected);setValue(set?.value===null||set?.value===undefined?'':formatCorrectionValue(selected,set.value));setError('');}
  async function submit(action:'set'|'clear'){
   if(!field)return;if(reason.trim().length<3){setError('Explique o motivo em pelo menos 3 caracteres.');return;}
-  const parsed=action==='set'?parseCorrectionValue(field,value):null;if(parsed&&!parsed.ok){setError(parsed.message);return;}if(!sale.sourceStamp){setError('A venda precisa ser atualizada antes desta correção.');return;}
-  setBusy(action);setError('');try{const response=await fetch('/api/sale-corrections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,requestId:crypto.randomUUID(),accountId:sale.accountId,saleId:sale.id,field,expectedRevision:current?.revision??0,mode,sourceValue,sourceStamp:sale.sourceStamp,reason:reason.trim(),...(action==='set'&&parsed?.ok?{value:parsed.value}:{})})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error);await onReload();toast.success(action==='set'?'Correção salva. A margem foi recalculada.':'Correção removida. O valor automático voltou a valer.');onClose();}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível salvar a correção.')}finally{setBusy(null)}
+  const parsed=action==='set'?parseCorrectionValue(field,value):null;if(parsed&&!parsed.ok){setError(parsed.message);return;}
+  setBusy(action);setError('');try{const response=await fetch('/api/sale-corrections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,requestId:crypto.randomUUID(),accountId:sale.accountId,saleId:sale.id,field,expectedRevision:current?.revision??0,mode,sourceValue,sourceStamp:saleCorrectionSourceStamp(sale,field,sourceValue),reason:reason.trim(),...(action==='set'&&parsed?.ok?{value:parsed.value}:{})})});const result=await response.json() as {error?:string};if(!response.ok)throw Error(result.error);await onReload();toast.success(action==='set'?'Correção salva. A margem foi recalculada.':'Correção removida. O valor automático voltou a valer.');onClose();}catch(cause){setError(cause instanceof Error?cause.message:'Não foi possível salvar a correção.')}finally{setBusy(null)}
  }
  return <DialogContent className="sale-correction-dialog"><DialogHeader><DialogTitle>{pending.kind==='stale_correction'?'Revisar correção':'Informar dado ausente'}</DialogTitle><DialogDescription>Pedido #{sale.orderId} · {sale.title} · {account?.name??'Conta'}</DialogDescription></DialogHeader>
   {!field?<><p className="warning-box"><RefreshCw size={17}/>Esta venda não trouxe informação suficiente para uma correção por campo. Atualize a conta e confira o anúncio vinculado.</p><div className="dialog-actions"><span/><Button onClick={onClose}>Fechar</Button></div></>:<>

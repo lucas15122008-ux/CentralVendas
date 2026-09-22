@@ -22,6 +22,10 @@ function currentValue(sale:Sale,field:CorrectableField){
  return sale[field];
 }
 
+export function saleCorrectionSourceStamp(sale:Sale,field:CorrectableField,value=currentValue(sale,field)){
+ return JSON.stringify({version:1,accountId:sale.accountId,saleId:sale.id,field,value});
+}
+
 function withValue(sale:Sale,field:CorrectableField,value:number,source:'manual_fallback'|'manual_override'):Sale{
  return {
   ...sale,
@@ -49,7 +53,7 @@ export function applySaleCorrections(sale:Sale,events:SaleCorrectionEvent[]):Sal
    }
    continue;
   }
-  if(officialValue!==event.sourceValue||sale.sourceStamp!==event.sourceStamp){
+  if(officialValue!==event.sourceValue||saleCorrectionSourceStamp(sale,event.field)!==event.sourceStamp){
    result.correctionState='stale';
    continue;
   }

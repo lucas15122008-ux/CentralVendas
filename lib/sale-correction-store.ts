@@ -1,5 +1,5 @@
 import type {Sale} from './finance.ts';
-import type {CorrectableField,SaleCorrectionEvent} from './sale-corrections.ts';
+import {saleCorrectionSourceStamp,type CorrectableField,type SaleCorrectionEvent} from './sale-corrections.ts';
 import {HttpError} from './server.ts';
 
 export type SaleCorrectionCommand={
@@ -48,7 +48,7 @@ export async function saveSaleCorrection(db:D1Database,ownerId:string,command:Sa
  const existing=await replay(db,ownerId,command.requestId);
  if(existing)return {event:existing,duplicate:true};
  if(currentSale.accountId!==command.accountId||currentSale.id!==command.saleId)throw new HttpError(404,'Venda não encontrada nesta conta.');
- if(currentSale.sourceStamp!==command.sourceStamp)throw new HttpError(409,'Os dados oficiais da venda mudaram. Recarregue antes de salvar.');
+ if(saleCorrectionSourceStamp(currentSale,command.field)!==command.sourceStamp)throw new HttpError(409,'O campo oficial da venda mudou. Recarregue antes de salvar.');
  const currentValue=currentSale[command.field];
  if(command.action==='set'){
   if(command.value===null)throw new HttpError(400,'Informe o valor da correção.');
