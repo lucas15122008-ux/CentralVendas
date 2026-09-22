@@ -36,3 +36,33 @@ test('migração cria fechamentos Full auditáveis e agenda releitura logística
  assert.ok(allocationIndexes.includes('idx_full_allocation_closure_sale'));
  assert.ok(allocationIndexes.includes('idx_full_allocation_owner_account'));
 });
+
+test('migração cria fichas, correções, catálogo e rollout auditáveis',()=>{
+ const sqlite=new DatabaseSync(':memory:');
+ const root=new URL('../drizzle/',import.meta.url);
+ const files=readdirSync(root).filter(file=>file.endsWith('.sql')).sort();
+ for(const file of files)sqlite.exec(readFileSync(new URL(file,root),'utf8'));
+ const tables=sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name);
+ assert.ok(tables.includes('ad_profile_events'));
+ assert.ok(tables.includes('sale_correction_events'));
+ assert.ok(tables.includes('meli_listings'));
+ assert.ok(tables.includes('meli_catalog_runs'));
+ assert.ok(tables.includes('ad_profile_rollouts'));
+
+ const connectionColumns=sqlite.prepare("PRAGMA table_info('meli_connections')").all();
+ const financialsVersion=connectionColumns.find(column=>column.name==='financials_version');
+ assert.deepEqual(financialsVersion&&{notnull:financialsVersion.notnull,dflt_value:financialsVersion.dflt_value},{notnull:1,dflt_value:'1'});
+
+ const profileIndexes=sqlite.prepare("PRAGMA index_list('ad_profile_events')").all().map(row=>row.name);
+ assert.ok(profileIndexes.includes('idx_ad_profiles_owner_request'));
+ assert.ok(profileIndexes.includes('idx_ad_profiles_target_revision'));
+ const correctionIndexes=sqlite.prepare("PRAGMA index_list('sale_correction_events')").all().map(row=>row.name);
+ assert.ok(correctionIndexes.includes('idx_sale_corrections_owner_request'));
+ assert.ok(correctionIndexes.includes('idx_sale_corrections_target_revision'));
+
+ const listingIndexes=sqlite.prepare("PRAGMA index_list('meli_listings')").all().map(row=>row.name);
+ assert.ok(listingIndexes.includes('idx_meli_listings_target'));
+ const profileColumns=sqlite.prepare("PRAGMA table_info('ad_profile_events')").all();
+ const variation=profileColumns.find(column=>column.name==='variation_id');
+ assert.deepEqual(variation&&{notnull:variation.notnull,dflt_value:variation.dflt_value},{notnull:1,dflt_value:"''"});
+});

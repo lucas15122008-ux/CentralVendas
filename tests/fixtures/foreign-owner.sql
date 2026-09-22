@@ -9,6 +9,8 @@ VALUES('70000000-0000-4000-8000-000000000003','qa_other_owner','70000000-0000-40
 -- Venda sintética do usuário local para testar a conciliação sem chamar APIs externas.
 INSERT OR IGNORE INTO accounts (id, owner_id, name, created_at)
 VALUES ('71000000-0000-4000-8000-000000000001','local_seedy','Conta QA conciliação','2026-01-01T00:00:00Z');
+DELETE FROM sale_correction_events WHERE owner_id='local_seedy' AND account_id='71000000-0000-4000-8000-000000000001';
+DELETE FROM ad_profile_events WHERE owner_id='local_seedy' AND account_id='71000000-0000-4000-8000-000000000001';
 DELETE FROM reconciliation_events WHERE owner_id='local_seedy' AND account_id='71000000-0000-4000-8000-000000000001';
 DELETE FROM cost_versions WHERE owner_id='local_seedy' AND account_id='71000000-0000-4000-8000-000000000001' AND import_id<>'71000000-0000-4000-8000-000000000002';
 DELETE FROM imports WHERE owner_id='local_seedy' AND account_id='71000000-0000-4000-8000-000000000001' AND id<>'71000000-0000-4000-8000-000000000002';
@@ -22,6 +24,8 @@ VALUES('71000000-0000-4000-8000-000000000004','local_seedy','71000000-0000-4000-
 -- Ofertas sintéticas Full e comum do mesmo SKU para testar fechamento mensal.
 INSERT OR IGNORE INTO accounts (id, owner_id, name, created_at)
 VALUES ('72000000-0000-4000-8000-000000000001','local_seedy','Conta QA fechamento Full','2026-01-01T00:00:00Z');
+DELETE FROM sale_correction_events WHERE owner_id='local_seedy' AND account_id='72000000-0000-4000-8000-000000000001';
+DELETE FROM ad_profile_events WHERE owner_id='local_seedy' AND account_id='72000000-0000-4000-8000-000000000001';
 DELETE FROM full_closure_allocations WHERE owner_id='local_seedy' AND account_id='72000000-0000-4000-8000-000000000001';
 DELETE FROM full_closure_events WHERE owner_id='local_seedy' AND account_id='72000000-0000-4000-8000-000000000001';
 DELETE FROM reconciliation_events WHERE owner_id='local_seedy' AND account_id='72000000-0000-4000-8000-000000000001';

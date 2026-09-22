@@ -3,7 +3,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {calculateSale} from '../lib/finance.ts';
-const base='http://127.0.0.1:5173';
+const base=process.env.TEST_BASE_URL??'http://localhost:5173';
 const auth={Cookie:'__sites_local_auth=1',Origin:base};
 const foreignAccount='70000000-0000-4000-8000-000000000001';
 const foreignImport='70000000-0000-4000-8000-000000000002';
@@ -23,7 +23,7 @@ test('API privada: persistência, isolamento, idempotência e histórico',async 
   // Vite allows localhost through its development CORS middleware, so this
   // mismatch reaches our API's origin check instead of testing Vite's early
   // rejection (which can leave an unread body on its keep-alive connection).
-  const denied=await call('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost:5173'},body});
+  const denied=await call('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://127.0.0.1:5173'},body});
   assert.equal(denied.status,403);
   assert.equal((await denied.json()).error,'Origem da solicitação inválida.');
   assert.equal((await fetch(base+'/api/accounts',{method:'POST',headers:{Cookie:auth.Cookie,'Content-Type':'application/json'},body})).status,403);
@@ -69,7 +69,7 @@ test('Mercado Livre: rotas privadas, configuração segura e cancelamento OAuth'
  const post=(path,body,headers={})=>call('/api/meli/'+path,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
  await t.test('status exige login e alterações exigem mesma origem',async()=>{
   assert.equal((await fetch(base+'/api/meli/status')).status,401);
-  const denied=await post('settings',{clientId:'123',clientSecret:'local-test-secret',pkce:true},{Origin:'http://localhost:5173'});assert.equal(denied.status,403);
+  const denied=await post('settings',{clientId:'123',clientSecret:'local-test-secret',pkce:true},{Origin:'http://127.0.0.1:5173'});assert.equal(denied.status,403);
  });
  await t.test('salva configuração sem devolver segredo',async()=>{
   const existing=await workspace();const connections=await (await call('/api/meli/status')).json();for(const c of connections.connections){if(c.status==='authorizing'&&existing.accounts.some(a=>a.id===c.accountId&&a.name.startsWith('QA')))await post('disconnect',{accountId:c.accountId});}
@@ -92,6 +92,67 @@ test('duas autorizações simultâneas mantêm o vínculo de cada aba',async()=>
  for(let i=0;i<2;i++){const r=await call('/api/accounts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:'QA duas abas '+crypto.randomUUID().slice(0,6)})});const id=(await r.json()).id;const flow=await call('/api/meli/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountId:id})});assert.equal(flow.status,200);cookies.push(flow.headers.get('set-cookie').split(';')[0]);flows.push({id,state:new URL((await flow.json()).url).searchParams.get('state')})}
  const jar=new Map(cookies.map(c=>[c.split('=')[0],c]));
  for(const f of flows){const r=await call('/api/meli/callback?state='+f.state+'&error=access_denied',{redirect:'manual',headers:{Cookie:auth.Cookie+'; '+[...jar.values()].join('; ')}});assert.match(new URL(r.headers.get('location')).searchParams.get('message'),/cancelada/);jar.delete(r.headers.get('set-cookie').split('=')[0]);await call('/api/meli/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountId:f.id})});}
+});
+test('fichas de anúncio: privacidade, precisão, cópia, idempotência e revisão',async()=>{
+ const fixtureAccount='71000000-0000-4000-8000-000000000001';
+ const fullAccount='72000000-0000-4000-8000-000000000001';
+ const post=(body,headers={})=>call('/api/ad-profiles',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
+ const first={
+  action:'set',requestId:crypto.randomUUID(),accountId:fixtureAccount,itemId:'MLB-QA-1',
+  variationId:'FULL',validFrom:'2026-01-01',expectedRevision:0,
+  payload:{unitCostTenThousandths:0,tax:{mode:'included'},operation:'auto'},
+  reason:'Custo zero confirmado para teste',
+ };
+ assert.equal((await fetch(base+'/api/ad-profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(first)})).status,401);
+ assert.equal((await post(first,{Origin:'http://127.0.0.1:5173'})).status,403);
+ const saved=await post(first);assert.equal(saved.status,201);const event=(await saved.json()).event;
+ assert.equal(event.variationId,'FULL');assert.equal(event.payload.unitCostTenThousandths,0);assert.equal(event.revision,1);
+ const replay=await post(first);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
+ assert.equal((await post({...first,requestId:crypto.randomUUID()})).status,409);
+ assert.equal((await post({...first,requestId:crypto.randomUUID(),variationId:''})).status,400);
+ assert.equal((await post({...first,requestId:crypto.randomUUID(),payload:{...first.payload,unitCostTenThousandths:-1}})).status,400);
+ assert.equal((await post({...first,requestId:crypto.randomUUID(),accountId:foreignAccount})).status,404);
+
+ const source={
+  ...first,requestId:crypto.randomUUID(),accountId:fullAccount,itemId:'MLB-QA-FULL',
+  variationId:null,payload:{unitCostTenThousandths:1_000_050,tax:{mode:'unit',valueTenThousandths:12_340},operation:'full'},
+ };
+ const sourceSaved=await post(source);assert.equal(sourceSaved.status,201);
+ const copied=await post({
+  ...source,requestId:crypto.randomUUID(),itemId:'MLB-QA-COMMON',
+  payload:{unitCostTenThousandths:999,tax:{mode:'included'},operation:'other'},
+  copyFrom:{accountId:fullAccount,itemId:'MLB-QA-FULL',variationId:null},
+ });
+ assert.equal(copied.status,201);const copyEvent=(await copied.json()).event;
+ assert.equal(copyEvent.payload.unitCostTenThousandths,1_000_050);
+ assert.deepEqual(copyEvent.payload.tax,{mode:'unit',valueTenThousandths:12_340});
+ assert.equal(copyEvent.payload.operation,'other');
+ assert.equal((await post({
+  ...source,requestId:crypto.randomUUID(),itemId:'MLB-QA-COMMON',expectedRevision:1,
+  copyFrom:{accountId:foreignAccount,itemId:'MLB-FOREIGN',variationId:null},
+ })).status,404);
+});
+
+test('correções por campo: fonte atual, fallback, revisão e isolamento',async()=>{
+ const fixtureAccount='72000000-0000-4000-8000-000000000001';
+ const saleId=fixtureAccount+':9101:0';
+ const post=(body,headers={})=>call('/api/sale-corrections',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
+ const current=(await workspace()).sales.find(item=>item.id===saleId);assert.ok(current?.sourceStamp);
+ const override={
+  action:'set',requestId:crypto.randomUUID(),accountId:fixtureAccount,saleId,
+  field:'feeCents',expectedRevision:0,mode:'override',value:4900,
+  sourceValue:current.feeCents,sourceStamp:current.sourceStamp,reason:'Tarifa oficial conferida no extrato',
+ };
+ assert.equal((await post(override,{Origin:'http://127.0.0.1:5173'})).status,403);
+ const saved=await post(override);assert.equal(saved.status,201);assert.equal((await saved.json()).event.value,4900);
+ const replay=await post(override);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
+ assert.equal((await post({...override,requestId:crypto.randomUUID()})).status,409);
+ assert.equal((await post({...override,requestId:crypto.randomUUID(),expectedRevision:1,sourceValue:4999})).status,409);
+ assert.equal((await post({...override,requestId:crypto.randomUUID(),expectedRevision:1,mode:'fallback'})).status,409);
+ assert.equal((await post({...override,requestId:crypto.randomUUID(),expectedRevision:1,field:'invalid'})).status,400);
+ assert.equal((await post({...override,requestId:crypto.randomUUID(),expectedRevision:1,value:-1})).status,400);
+ assert.equal((await post({...override,requestId:crypto.randomUUID(),expectedRevision:1,reason:''})).status,400);
+ assert.equal((await post({...override,requestId:crypto.randomUUID(),expectedRevision:0,accountId:foreignAccount})).status,404);
 });
 test('conciliação: vínculo, ajuste, histórico, revisão e isolamento',async()=>{
  const fixtureAccount='71000000-0000-4000-8000-000000000001';

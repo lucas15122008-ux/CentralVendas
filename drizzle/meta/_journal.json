@@ -57,6 +57,13 @@
       "when": 1789872888580,
       "tag": "0007_monthly_full_closures",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790077825665,
+      "tag": "0008_ad_profiles",
+      "breakpoints": true
     }
   ]
 }
