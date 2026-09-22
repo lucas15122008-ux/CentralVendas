@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {calculateSale,summarizeSales,groupProducts} from '../lib/finance.ts';
 import type {Sale,CostRecord} from '../lib/finance.ts';
+import type {TaxRule} from '../lib/ad-profiles.ts';
 const sale:Sale={id:'s',orderId:'o',accountId:'a',sku:'001',title:'Produto',date:'2026-09-10',quantity:2,costQuantity:2,revenueCents:20000,feeCents:3000,shippingCents:1000,otherCents:0,status:'paid'};
 const cost:CostRecord={id:'c',accountId:'a',sku:'001',description:'Produto',unitCost:50,taxValue:5,taxType:'unit',taxTreatment:'included',validFrom:'2026-09-01',importedAt:'2026-09-11T00:00:00Z',importId:'i'};
 test('imposto incluído não é deduzido novamente',()=>assert.equal(calculateSale(sale,[cost]).contributionCents,6000));
@@ -51,4 +52,10 @@ test('fechamento Full desatualizado impede contribuição',()=>{
 test('venda comum completa permanece automática',()=>{
  const result=calculateSale({...sale,operation:{channel:'other',source:'meli'}},[cost]);
  assert.equal(result.contributionCents,6000);assert.equal(result.resultState,'automatic');
+});
+test('ficha do anúncio é a fonte primária mesmo quando existe custo legado',()=>{
+ const tax:TaxRule={mode:'included'};
+ const result=calculateSale({...sale,adProfile:{eventId:'p',revision:1,validFrom:'2026-09-01',unitCostTenThousandths:1_000_050,tax}},[{...cost,unitCost:1}]);
+ assert.equal(result.costCents,20001);
+ assert.equal(result.taxCents,0);
 });

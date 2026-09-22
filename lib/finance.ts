@@ -1,8 +1,12 @@
+import type {TaxRule} from './ad-profiles.ts';
+import type {FinancialSource} from './sale-projection.ts';
+
 export type CostRecord = { id:string; accountId:string; sku:string; description:string; unitCost:number; taxValue:number|null; taxType:'unit'|'percent'; taxTreatment:'included'|'additional'|'unknown'; validFrom:string; importedAt:string; importId:string };
 export type ReconciliationAmounts = {revenueCents:number|null;feeCents:number|null;shippingCents:number|null;otherCents:number|null;costCents:number|null;taxCents:number|null;fullExpenseCents:number|null};
 export type SalesChannel='full'|'other'|'unknown';
 export type SaleOperation={channel:SalesChannel;source:'meli'|'manual'|'product'|'unknown';conflict?:string};
-export type Sale = { id:string; orderId:string; accountId:string; sku:string; title:string; date:string; quantity:number; costQuantity:number|null; grossSalesCents?:number|null; revenueCents:number|null; feeCents:number|null; shippingCents:number|null; otherCents:number|null; status:'paid'|'cancelled'|'refunded'|'pending'; source?:'mercadolivre'; sourceIssues?:string[]; itemId?:string; variationId?:string|null;logisticType?:string|null;operation?:SaleOperation;costSku?:string;reconciliation?:{state:'manual'|'stale';channel:SalesChannel;amounts?:ReconciliationAmounts};sourceStamp?:string;saleRevision?:number;linkRevision?:number;linkValidFrom?:string;fullExpense?:{cents:number;state:'estimated'|'closed';month:string;closureId?:string;unitRateCents:number};fullClosureState?:'stale' };
+export type FinancialField='revenueCents'|'feeCents'|'shippingCents'|'otherCents'|'costQuantity'|'costCents'|'taxCents'|'fullExpenseCents';
+export type Sale = { id:string; orderId:string; accountId:string; sku:string; title:string; date:string; quantity:number; costQuantity:number|null; grossSalesCents?:number|null; revenueCents:number|null; feeCents:number|null; shippingCents:number|null; otherCents:number|null; status:'paid'|'cancelled'|'refunded'|'pending'; source?:'mercadolivre'; sourceIssues?:string[]; itemId?:string; variationId?:string|null;logisticType?:string|null;operation?:SaleOperation;costSku?:string;reconciliation?:{state:'manual'|'stale';channel:SalesChannel;amounts?:ReconciliationAmounts};sourceStamp?:string;saleRevision?:number;linkRevision?:number;linkValidFrom?:string;fullExpense?:{cents:number;state:'estimated'|'closed';month:string;closureId?:string;unitRateCents:number};fullClosureState?:'stale';adProfile?:{eventId:string;revision:number;validFrom:string;unitCostTenThousandths:number;tax:TaxRule};fieldSources?:Partial<Record<FinancialField,FinancialSource>>;correctionState?:'corrected'|'stale' };
 export type ResultState='pending'|'provisional'|'automatic'|'closed'|'manual'|'stale';
 export type SaleResult = Sale & { cost:CostRecord|null; costCents:number|null; taxCents:number|null; fullExpenseCents:number|null; contributionCents:number|null; margin:number|null; reasons:string[];resultState:ResultState };
 function resultState(sale:Sale,reasons:string[]):ResultState{
@@ -15,6 +19,7 @@ function resultState(sale:Sale,reasons:string[]):ResultState{
 }
 export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
   const cost=costs.filter(c=>c.accountId===sale.accountId&&c.sku===(sale.costSku??sale.sku)&&c.validFrom<=sale.date).sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.importedAt.localeCompare(a.importedAt)||b.id.localeCompare(a.id))[0]??null;
+  const profile=sale.adProfile;
   const projectedFull=sale.fullExpense?.cents;
   if(sale.reconciliation?.state==='manual'&&sale.reconciliation.amounts){
     const a=sale.reconciliation.amounts;
@@ -36,11 +41,17 @@ export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
   if(sale.shippingCents===null)reasons.push('Frete do vendedor não confirmado');
   if(sale.otherCents===null)reasons.push('Despesas variáveis não confirmadas');
   if(sale.costQuantity===null)reasons.push('Recuperação de estoque a conferir');
-  if(!cost)reasons.push('Custo sem vigência para esta venda');
-  if(cost?.taxTreatment==='unknown')reasons.push('Composição do imposto a conferir');
-  if(cost&&cost.taxValue===null)reasons.push('Imposto não informado');
-  const costCents=cost&&sale.costQuantity!==null?Math.round(Math.round(cost.unitCost*10000)*sale.costQuantity/100):null;
-  const taxCents=cost&&cost.taxValue!==null?(cost.taxTreatment==='additional'?(cost.taxType==='percent'?(sale.revenueCents===null?null:Math.round(sale.revenueCents*cost.taxValue/100)):(sale.costQuantity===null?null:Math.round(Math.round(cost.taxValue*10000)*sale.costQuantity/100))):0):null;
+  if(!profile&&!cost)reasons.push('Custo sem vigência para esta venda');
+  if(!profile&&cost?.taxTreatment==='unknown')reasons.push('Composição do imposto a conferir');
+  if(!profile&&cost&&cost.taxValue===null)reasons.push('Imposto não informado');
+  const costCents=profile
+   ?sale.costQuantity===null?null:Math.round(profile.unitCostTenThousandths*sale.costQuantity/100)
+   :cost&&sale.costQuantity!==null?Math.round(Math.round(cost.unitCost*10000)*sale.costQuantity/100):null;
+  const taxCents=profile
+   ?profile.tax.mode==='included'?0
+    :profile.tax.mode==='unit'?sale.costQuantity===null?null:Math.round(profile.tax.valueTenThousandths*sale.costQuantity/100)
+    :sale.revenueCents===null?null:Math.round(sale.revenueCents*profile.tax.rateBasisPoints/10_000)
+   :cost&&cost.taxValue!==null?(cost.taxTreatment==='additional'?(cost.taxType==='percent'?(sale.revenueCents===null?null:Math.round(sale.revenueCents*cost.taxValue/100)):(sale.costQuantity===null?null:Math.round(Math.round(cost.taxValue*10000)*sale.costQuantity/100))):0):null;
   const fullExpenseCents=projectedFull??(sale.operation?.channel==='full'?null:0);
   if(fullExpenseCents===null)reasons.push('Despesa Full ainda sem estimativa');
   const contributionCents=reasons.length?null:(sale.revenueCents??0)-(sale.feeCents??0)-(sale.shippingCents??0)-(sale.otherCents??0)-(costCents??0)-(taxCents??0)-fullExpenseCents!;
