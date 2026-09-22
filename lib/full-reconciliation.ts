@@ -34,7 +34,11 @@ export function fullMonthSource(preview:FullPreview,costs:CostRecord[]):string{
  const sales=preview.eligible.map(sale=>{
   const selectedCost=calculateSale(sale,costs).cost;
   const manualAmounts=sale.reconciliation?.state==='manual'?sale.reconciliation.amounts??null:null;
-  return {id:sale.id,date:sale.date,units:sale.costQuantity,operation:{channel:sale.operation?.channel??'unknown',source:sale.operation?.source??'unknown',logisticType:sale.logisticType??null},sourceStamp:sale.sourceStamp??null,costId:selectedCost?.id??null,manualAmounts};
+  const correctedFields=(['revenueCents','feeCents','shippingCents','otherCents','costQuantity'] as const).flatMap(field=>{
+   const source=sale.fieldSources?.[field];
+   return source==='manual_fallback'||source==='manual_override'?[{field,value:sale[field],source}]:[];
+  });
+  return {id:sale.id,date:sale.date,units:sale.costQuantity,operation:{channel:sale.operation?.channel??'unknown',source:sale.operation?.source??'unknown',logisticType:sale.logisticType??null},sourceStamp:sale.sourceStamp??null,costId:selectedCost?.id??null,adProfile:sale.adProfile??null,correctedFields,correctionState:sale.correctionState??null,manualAmounts};
  });
  return JSON.stringify({sales});
 }

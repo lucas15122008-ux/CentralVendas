@@ -9,7 +9,7 @@ import type {AdProfileEvent,AdProfilePayload} from '../lib/ad-profiles.ts';
 const sale:Sale={
  id:'sale-1',orderId:'order-1',accountId:'account-a',sku:'64265',title:'Radiador',
  itemId:'MLB1',variationId:'variation-a',date:'2026-09-20',quantity:2,costQuantity:2,
- revenueCents:30000,feeCents:3000,shippingCents:1000,otherCents:0,status:'paid',
+ revenueCents:30000,feeCents:3000,shippingCents:1000,otherCents:0,status:'paid',logisticType:'cross_docking',
 };
 
 const included:AdProfilePayload={
@@ -89,8 +89,8 @@ test('ficha futura não converte campo ausente em zero',()=>{
 
 test('logística oficial prevalece e operação da ficha só resolve canal desconhecido',()=>{
  const full=applyAdProfiles([{...sale,logisticType:'fulfillment'}],[event({payload:{...included,operation:'other'}})])[0];
- const configured=applyAdProfiles([sale],[event({payload:{...included,operation:'full'}})])[0];
- const automatic=applyAdProfiles([sale],[event({payload:{...included,operation:'auto'}})])[0];
+ const configured=applyAdProfiles([{...sale,logisticType:null}],[event({payload:{...included,operation:'full'}})])[0];
+ const automatic=applyAdProfiles([{...sale,logisticType:null}],[event({payload:{...included,operation:'auto'}})])[0];
  assert.equal(full.operation?.channel,'full');
  assert.equal(full.operation?.source,'meli');
  assert.ok(full.operation?.conflict);

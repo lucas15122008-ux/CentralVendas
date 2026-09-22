@@ -14,7 +14,7 @@ export type AdProfileCommand={
  origin:'native'|'legacy';
 };
 
-type AdProfileRow=Omit<AdProfileEvent,'variationId'|'payload'|'action'|'origin'> & {
+export type AdProfileRow=Omit<AdProfileEvent,'variationId'|'payload'|'action'|'origin'> & {
  variationId:string;
  payload:string|null;
  action:string;

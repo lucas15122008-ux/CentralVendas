@@ -6,11 +6,11 @@ export type ReconciliationAmounts = {revenueCents:number|null;feeCents:number|nu
 export type SalesChannel='full'|'other'|'unknown';
 export type SaleOperation={channel:SalesChannel;source:'meli'|'manual'|'product'|'unknown';conflict?:string};
 export type FinancialField='revenueCents'|'feeCents'|'shippingCents'|'otherCents'|'costQuantity'|'costCents'|'taxCents'|'fullExpenseCents';
-export type Sale = { id:string; orderId:string; accountId:string; sku:string; title:string; date:string; quantity:number; costQuantity:number|null; grossSalesCents?:number|null; revenueCents:number|null; feeCents:number|null; shippingCents:number|null; otherCents:number|null; status:'paid'|'cancelled'|'refunded'|'pending'; source?:'mercadolivre'; sourceIssues?:string[]; itemId?:string; variationId?:string|null;logisticType?:string|null;operation?:SaleOperation;costSku?:string;reconciliation?:{state:'manual'|'stale';channel:SalesChannel;amounts?:ReconciliationAmounts};sourceStamp?:string;saleRevision?:number;linkRevision?:number;linkValidFrom?:string;fullExpense?:{cents:number;state:'estimated'|'closed';month:string;closureId?:string;unitRateCents:number};fullClosureState?:'stale';adProfile?:{eventId:string;revision:number;validFrom:string;unitCostTenThousandths:number;tax:TaxRule};fieldSources?:Partial<Record<FinancialField,FinancialSource>>;correctionState?:'corrected'|'stale' };
+export type Sale = { id:string; orderId:string; accountId:string; sku:string; title:string; date:string; quantity:number; costQuantity:number|null; grossSalesCents?:number|null; revenueCents:number|null; feeCents:number|null; shippingCents:number|null; otherCents:number|null; status:'paid'|'cancelled'|'refunded'|'pending'; source?:'mercadolivre'; sourceIssues?:string[]; itemId?:string; variationId?:string|null;logisticType?:string|null;operation?:SaleOperation;costSku?:string;reconciliation?:{state:'manual'|'stale';channel:SalesChannel;amounts?:ReconciliationAmounts};sourceStamp?:string;saleRevision?:number;linkRevision?:number;linkValidFrom?:string;fullExpense?:{cents:number;state:'estimated'|'closed';month:string;closureId?:string;unitRateCents:number};fullClosureState?:'stale';adProfile?:{eventId:string;revision:number;validFrom:string;unitCostTenThousandths:number;tax:TaxRule};fieldSources?:Partial<Record<FinancialField,FinancialSource>>;correctionState?:'corrected'|'stale';financialMode?:'legacy'|'native' };
 export type ResultState='pending'|'provisional'|'automatic'|'closed'|'manual'|'stale';
 export type SaleResult = Sale & { cost:CostRecord|null; costCents:number|null; taxCents:number|null; fullExpenseCents:number|null; contributionCents:number|null; margin:number|null; reasons:string[];resultState:ResultState };
 function resultState(sale:Sale,reasons:string[]):ResultState{
- if(sale.reconciliation?.state==='stale'||sale.fullClosureState==='stale')return 'stale';
+ if(sale.reconciliation?.state==='stale'||sale.fullClosureState==='stale'||sale.correctionState==='stale')return 'stale';
  if(reasons.length)return 'pending';
  if(sale.fullExpense?.state==='estimated')return 'provisional';
  if(sale.fullExpense?.state==='closed')return 'closed';
@@ -18,7 +18,7 @@ function resultState(sale:Sale,reasons:string[]):ResultState{
  return 'automatic';
 }
 export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
-  const cost=costs.filter(c=>c.accountId===sale.accountId&&c.sku===(sale.costSku??sale.sku)&&c.validFrom<=sale.date).sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.importedAt.localeCompare(a.importedAt)||b.id.localeCompare(a.id))[0]??null;
+  const cost=sale.financialMode==='native'?null:costs.filter(c=>c.accountId===sale.accountId&&c.sku===(sale.costSku??sale.sku)&&c.validFrom<=sale.date).sort((a,b)=>b.validFrom.localeCompare(a.validFrom)||b.importedAt.localeCompare(a.importedAt)||b.id.localeCompare(a.id))[0]??null;
   const profile=sale.adProfile;
   const projectedFull=sale.fullExpense?.cents;
   if(sale.reconciliation?.state==='manual'&&sale.reconciliation.amounts){
@@ -28,6 +28,7 @@ export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
     const effective={...a,fullExpenseCents};
     const labels:Record<keyof ReconciliationAmounts,string>={revenueCents:'Receita líquida',feeCents:'Tarifa',shippingCents:'Frete',otherCents:'Outras despesas',costCents:'Custo consumido',taxCents:'Imposto adicional',fullExpenseCents:'Despesa adicional Full'};
     const reasons=Object.entries(labels).filter(([key])=>effective[key as keyof ReconciliationAmounts]===null).map(([,label])=>label+' não confirmado');
+    if(sale.correctionState==='stale')reasons.push('Uma correção manual ficou desatualizada');
     if(sale.fullClosureState==='stale')reasons.push('O fechamento Full mudou: revise o mês');
     const contributionCents=reasons.length?null:effective.revenueCents!-effective.feeCents!-effective.shippingCents!-effective.otherCents!-effective.costCents!-effective.taxCents!-effective.fullExpenseCents!;
     const effectiveSale=keepsManualFull?{...sale,fullExpense:undefined}:sale;
@@ -35,6 +36,7 @@ export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
   }
   const reasons:string[]=[...(sale.sourceIssues??[])];
   if(sale.reconciliation?.state==='stale')reasons.push('A venda ou seu custo mudou: revise o ajuste manual');
+  if(sale.correctionState==='stale')reasons.push('Uma correção manual ficou desatualizada');
   if(sale.fullClosureState==='stale')reasons.push('O fechamento Full mudou: revise o mês');
   if(sale.revenueCents===null)reasons.push('Receita líquida a conciliar');
   if(sale.feeCents===null)reasons.push('Tarifa não confirmada');
@@ -52,8 +54,10 @@ export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
     :profile.tax.mode==='unit'?sale.costQuantity===null?null:Math.round(profile.tax.valueTenThousandths*sale.costQuantity/100)
     :sale.revenueCents===null?null:Math.round(sale.revenueCents*profile.tax.rateBasisPoints/10_000)
    :cost&&cost.taxValue!==null?(cost.taxTreatment==='additional'?(cost.taxType==='percent'?(sale.revenueCents===null?null:Math.round(sale.revenueCents*cost.taxValue/100)):(sale.costQuantity===null?null:Math.round(Math.round(cost.taxValue*10000)*sale.costQuantity/100))):0):null;
-  const fullExpenseCents=projectedFull??(sale.operation?.channel==='full'?null:0);
-  if(fullExpenseCents===null)reasons.push('Despesa Full ainda sem estimativa');
+  const operationUnknown=sale.operation?.channel==='unknown';
+  if(operationUnknown)reasons.push('Modalidade logística não confirmada');
+  const fullExpenseCents=projectedFull??(sale.operation?.channel==='full'||operationUnknown?null:0);
+  if(fullExpenseCents===null&&!operationUnknown)reasons.push('Despesa Full ainda sem estimativa');
   const contributionCents=reasons.length?null:(sale.revenueCents??0)-(sale.feeCents??0)-(sale.shippingCents??0)-(sale.otherCents??0)-(costCents??0)-(taxCents??0)-fullExpenseCents!;
   return {...sale,cost,costCents,taxCents,fullExpenseCents,contributionCents,margin:contributionCents!==null&&sale.revenueCents!==null&&sale.revenueCents>0?contributionCents/sale.revenueCents*100:null,reasons,resultState:resultState(sale,reasons)};
 }

@@ -83,6 +83,14 @@ test('retrato mensal muda quando o custo manual da venda é revisado',()=>{
  assert.notEqual(fullMonthSource(original,[cost]),fullMonthSource(adjusted,[cost]));
 });
 
+test('retrato mensal inclui ficha e correções materiais',()=>{
+ const base=sale('profiled',{adProfile:{eventId:'p1',revision:1,validFrom:'2026-01-01',unitCostTenThousandths:1_000_000,tax:{mode:'included'}},fieldSources:{otherCents:'manual_fallback'}});
+ const source=fullMonthSource(previewFullMonth([base],[],'a','2026-09'),[]);
+ const changedProfile=fullMonthSource(previewFullMonth([{...base,adProfile:{...base.adProfile!,eventId:'p2',revision:2,unitCostTenThousandths:1_100_000}}],[],'a','2026-09'),[]);
+ const changedCorrection=fullMonthSource(previewFullMonth([{...base,otherCents:700}],[],'a','2026-09'),[]);
+ assert.notEqual(source,changedProfile);assert.notEqual(source,changedCorrection);
+});
+
 test('prévia carregada só pode ser usada na conta e no mês correspondentes',()=>{
  const data={accountId:'a',month:'2026-09',preview:previewFullMonth([sale('same')],[cost],'a','2026-09')};
  assert.equal(selectedFullPreview(data,'a','2026-09'),data);

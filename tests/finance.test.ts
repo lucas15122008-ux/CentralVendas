@@ -59,3 +59,11 @@ test('ficha do anúncio é a fonte primária mesmo quando existe custo legado',(
  assert.equal(result.costCents,20001);
  assert.equal(result.taxCents,0);
 });
+test('modalidade desconhecida impede margem até confirmar possível despesa Full',()=>{
+ const result=calculateSale({...sale,operation:{channel:'unknown',source:'unknown'}},[cost]);
+ assert.equal(result.contributionCents,null);assert.equal(result.fullExpenseCents,null);assert.ok(result.reasons.some(reason=>/Modalidade/.test(reason)));
+});
+test('correção obsoleta impede margem e deixa o resultado stale',()=>{
+ const result=calculateSale({...sale,operation:{channel:'other',source:'meli'},correctionState:'stale'},[cost]);
+ assert.equal(result.contributionCents,null);assert.equal(result.resultState,'stale');assert.ok(result.reasons.some(reason=>/correção/i.test(reason)));
+});

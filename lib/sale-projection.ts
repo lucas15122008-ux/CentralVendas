@@ -1,7 +1,9 @@
 import type {AdProfileEvent,OperationOverride} from './ad-profiles.ts';
 import {activeAdProfile} from './ad-profiles.ts';
-import type {Sale,SalesChannel} from './finance.ts';
-import {resolveOperation} from './reconciliation.ts';
+import {calculateSale,type CostRecord,type Sale,type SaleResult,type SalesChannel} from './finance.ts';
+import {applyFullClosures,type FullClosure} from './full-reconciliation.ts';
+import {applyReconciliation,resolveOperation,type ReconciliationEvent} from './reconciliation.ts';
+import {applySaleCorrections,type SaleCorrectionEvent} from './sale-corrections.ts';
 
 export type FinancialSource=
  | 'meli'
@@ -50,4 +52,35 @@ export function applyAdProfiles(sales:Sale[],profiles:AdProfileEvent[]):Sale[]{
    operation:resolveOperation(sale.logisticType,manualChannel,productChannel),
   };
  });
+}
+
+export type SaleProjectionInput={
+ rawSales:Sale[];
+ legacyCosts:CostRecord[];
+ reconciliationEvents:ReconciliationEvent[];
+ profiles:AdProfileEvent[];
+ corrections:SaleCorrectionEvent[];
+ closures:FullClosure[];
+ rolloutState:'pending'|'blocked'|'active';
+};
+export type SaleProjection={sales:Sale[];results:SaleResult[];calculationCosts:CostRecord[]};
+
+function withoutLegacyProductLink(original:Sale):Sale{
+ const sale:Sale={...original,financialMode:'native'};
+ delete sale.costSku;delete sale.linkRevision;delete sale.linkValidFrom;delete sale.adProfile;
+ if(sale.operation?.source==='product')delete sale.operation;
+ return sale;
+}
+
+export function projectSales(input:SaleProjectionInput):SaleProjection{
+ const legacy=applyReconciliation(input.rawSales,input.legacyCosts,input.reconciliationEvents);
+ if(input.rolloutState!=='active'){
+  const sales=applyFullClosures(legacy,input.closures),calculationCosts=input.legacyCosts;
+  return {sales,results:sales.map(sale=>calculateSale(sale,calculationCosts)),calculationCosts};
+ }
+ const historical=legacy.map(withoutLegacyProductLink);
+ const corrected=historical.map(sale=>applySaleCorrections(sale,input.corrections));
+ const profiled=applyAdProfiles(corrected,input.profiles);
+ const sales=applyFullClosures(profiled,input.closures),calculationCosts:CostRecord[]=[];
+ return {sales,results:sales.map(sale=>calculateSale(sale,calculationCosts)),calculationCosts};
 }

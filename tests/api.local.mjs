@@ -121,6 +121,10 @@ test('migração de fichas: prévia, bloqueio, rollback, fonte, ativação e iso
  const activation={requestId:crypto.randomUUID(),expectedSourceStamp:plan.sourceStamp};
  const activated=await post(activation);assert.equal(activated.status,200);let result=await activated.json();assert.equal(result.state,'active');assert.ok(result.persistedProfileCount>=6);
  const replay=await post(activation);assert.equal(replay.status,200);result=await replay.json();assert.equal(result.state,'active');assert.equal(result.persistedProfileCount,(await (await call('/api/ad-profile-migration')).json()).persistedProfileCount);
+ const projected=await workspace();assert.equal(projected.rollout.state,'active');assert.ok(projected.adProfiles.length>=6);assert.ok(Array.isArray(projected.saleCorrections));assert.ok(Array.isArray(projected.listings));assert.ok(Array.isArray(projected.pending));
+ assert.equal(projected.listings.find(item=>item.itemId==='MLB-QA-COMMON').hasProfile,true);
+ assert.ok(projected.pending.some(item=>item.kind==='missing_profile'&&item.itemId==='MLB-QA-1'));
+ const common=projected.sales.find(item=>item.itemId==='MLB-QA-COMMON');assert.equal(common.financialMode,'native');assert.equal(calculateSale(common,projected.costs).contributionCents,34500);
 });
 
 test('fichas de anúncio: privacidade, precisão, cópia, idempotência e revisão',async()=>{
@@ -195,7 +199,7 @@ test('conciliação: vínculo, ajuste, histórico, revisão e isolamento',async(
  const linked=await post(link);assert.equal(linked.status,201);assert.equal((await linked.json()).event.revision,1);
  const replay=await post(link);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
  assert.equal((await post({...link,requestId:crypto.randomUUID(),sku:'INEXISTENTE',expectedRevision:0})).status,404);
- data=await workspace();sale=data.sales.find(item=>item.id===saleId);assert.equal(sale.costSku,'64265');assert.ok(sale.sourceStamp);
+ data=await workspace();sale=data.sales.find(item=>item.id===saleId);assert.equal(sale.costSku,undefined);assert.equal(sale.financialMode,'native');assert.ok(sale.sourceStamp);
  const adjustment={kind:'sale',action:'set',requestId:crypto.randomUUID(),accountId:fixtureAccount,saleId,expectedRevision:0,sourceStamp:sale.sourceStamp,channel:'full',amounts:{revenueCents:25000,feeCents:2500,shippingCents:1000,otherCents:0,costCents:10000,taxCents:0,fullExpenseCents:1500},reason:'Venda Full conferida'};
  const adjusted=await post(adjustment);assert.equal(adjusted.status,201);
  assert.equal((await post({...adjustment,requestId:crypto.randomUUID(),expectedRevision:0})).status,409);
@@ -220,7 +224,7 @@ test('fechamento Full: prévia, rateio, revisão, conflito e rollback',async()=>
  const close={action:'set',requestId,accountId:fixtureAccount,month,expectedRevision:0,totalExpenseCents:101,reason:'Demonstrativo Full setembro'};
  const saved=await postClosure(close);assert.equal(saved.status,201);let result=await saved.json();assert.equal(result.event.revision,1);assert.equal(result.event.allocations.length,1);assert.equal(result.event.allocations[0].expenseCents,101);
  const closedPreview=await call(`/api/full-closures?accountId=${fixtureAccount}&month=${month}`);assert.equal(closedPreview.status,200);assert.equal((await closedPreview.json()).estimatedExpenseCents,null);
- let projected=await workspace();let projectedSale=projected.sales.find(item=>item.id===fixtureAccount+':9101:0');assert.equal(projectedSale.fullExpense.state,'closed');assert.equal(projectedSale.fullExpense.cents,101);assert.equal(calculateSale(projectedSale,projected.costs).contributionCents,22899);assert.equal(calculateSale(projectedSale,projected.costs).resultState,'closed');assert.equal(projected.fullClosures.find(row=>row.id===result.event.id).action,'set');
+ let projected=await workspace();let projectedSale=projected.sales.find(item=>item.id===fixtureAccount+':9101:0');assert.equal(projectedSale.fullExpense.state,'closed');assert.equal(projectedSale.fullExpense.cents,101);assert.equal(calculateSale(projectedSale,projected.costs).contributionCents,22751);assert.equal(calculateSale(projectedSale,projected.costs).resultState,'closed');assert.equal(projected.fullClosures.find(row=>row.id===result.event.id).action,'set');
  const replay=await postClosure(close);assert.equal(replay.status,200);assert.equal((await replay.json()).duplicate,true);
  assert.equal((await postClosure({...close,requestId:crypto.randomUUID()})).status,409);
  assert.equal((await call(`/api/full-closures?accountId=${foreignAccount}&month=${month}`)).status,404);

@@ -16,7 +16,7 @@ export type SaleCorrectionCommand={
  reason:string;
 };
 
-type SaleCorrectionRow=Omit<SaleCorrectionEvent,'field'|'action'|'mode'> & {
+export type SaleCorrectionRow=Omit<SaleCorrectionEvent,'field'|'action'|'mode'> & {
  field:string;
  action:string;
  mode:string;

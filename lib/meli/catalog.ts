@@ -10,6 +10,7 @@ export type MeliListing={
  status:string;
  sellerSku:string|null;
  updatedAt:number;
+ hasProfile?:boolean;
 };
 
 const attribute=z.object({id:z.string(),value_name:z.string().nullish()});
