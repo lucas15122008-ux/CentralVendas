@@ -93,6 +93,36 @@ test('duas autorizações simultâneas mantêm o vínculo de cada aba',async()=>
  const jar=new Map(cookies.map(c=>[c.split('=')[0],c]));
  for(const f of flows){const r=await call('/api/meli/callback?state='+f.state+'&error=access_denied',{redirect:'manual',headers:{Cookie:auth.Cookie+'; '+[...jar.values()].join('; ')}});assert.match(new URL(r.headers.get('location')).searchParams.get('message'),/cancelada/);jar.delete(r.headers.get('set-cookie').split('=')[0]);await call('/api/meli/disconnect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accountId:f.id})});}
 });
+test('migração de fichas: prévia, bloqueio, rollback, fonte, ativação e isolamento',async()=>{
+ const unknownAccount='74000000-0000-4000-8000-000000000001';
+ const rollbackAccount='75000000-0000-4000-8000-000000000001';
+ const post=body=>call('/api/ad-profile-migration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await fetch(base+'/api/ad-profile-migration')).status,401);
+ let preview=await call('/api/ad-profile-migration');assert.equal(preview.status,200);
+ let plan=await preview.json();assert.equal(plan.state,'pending');assert.ok(plan.blockingDifferences>0);assert.equal(plan.persistedProfileCount,0);
+ assert.ok(plan.issues.some(issue=>issue.accountId===unknownAccount&&issue.code==='unknown_tax'));
+ assert.equal(plan.issues.some(issue=>issue.accountId===foreignAccount),false);
+ const blockedRequest={requestId:crypto.randomUUID(),expectedSourceStamp:plan.sourceStamp};
+ assert.equal((await post(blockedRequest)).status,409);
+ preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.state,'blocked');assert.equal(plan.persistedProfileCount,0);
+ assert.equal((await call('/api/ad-profile-migration',{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://127.0.0.1:5173'},body:JSON.stringify(blockedRequest)})).status,403);
+
+ const corrected='codigo;descricao;custo;imposto\nMIG-UNKNOWN;Produto corrigido;40,00;0\n';
+ assert.equal((await upload(corrected,{accountId:unknownAccount,validFrom:'2026-01-01'})).status,201);
+ preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.blockingDifferences,0);const beforeRollbackStamp=plan.sourceStamp;
+ const failed=await post({requestId:crypto.randomUUID(),expectedSourceStamp:beforeRollbackStamp});assert.equal(failed.status,500);
+ preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.state,'pending');assert.equal(plan.persistedProfileCount,0);
+
+ const unlock=new FormData();unlock.set('file',new File(['codigo;descricao;custo;imposto\nUNLOCK;Libera teste;1,00;0\n'],'migration-unlock.csv',{type:'text/csv'}));
+ unlock.set('config',JSON.stringify({...config(),accountId:rollbackAccount,validFrom:'2026-01-01'}));
+ assert.equal((await call('/api/imports',{method:'POST',body:unlock})).status,201);
+ assert.equal((await post({requestId:crypto.randomUUID(),expectedSourceStamp:beforeRollbackStamp})).status,409);
+ preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.blockingDifferences,0);assert.notEqual(plan.sourceStamp,beforeRollbackStamp);
+ const activation={requestId:crypto.randomUUID(),expectedSourceStamp:plan.sourceStamp};
+ const activated=await post(activation);assert.equal(activated.status,200);let result=await activated.json();assert.equal(result.state,'active');assert.ok(result.persistedProfileCount>=6);
+ const replay=await post(activation);assert.equal(replay.status,200);result=await replay.json();assert.equal(result.state,'active');assert.equal(result.persistedProfileCount,(await (await call('/api/ad-profile-migration')).json()).persistedProfileCount);
+});
+
 test('fichas de anúncio: privacidade, precisão, cópia, idempotência e revisão',async()=>{
  const fixtureAccount='71000000-0000-4000-8000-000000000001';
  const fullAccount='72000000-0000-4000-8000-000000000001';
@@ -115,6 +145,7 @@ test('fichas de anúncio: privacidade, precisão, cópia, idempotência e revis�
 
  const source={
   ...first,requestId:crypto.randomUUID(),accountId:fullAccount,itemId:'MLB-QA-FULL',
+  expectedRevision:1,
   variationId:null,payload:{unitCostTenThousandths:1_000_050,tax:{mode:'unit',valueTenThousandths:12_340},operation:'full'},
  };
  const sourceSaved=await post(source);assert.equal(sourceSaved.status,201);
