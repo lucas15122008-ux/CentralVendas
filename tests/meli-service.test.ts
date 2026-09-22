@@ -47,7 +47,17 @@ test('falha ao salvar um membro do frete reverte o lote inteiro',async()=>{const
 test('configuração não troca enquanto há autorização ativa',async()=>{const x=setup();await x.authorize();await assert.rejects(x.service.configure('owner',{clientId:'999',clientSecret:'replacement',pkce:false}));assert.equal((await x.service.status('owner')).app.clientId,'123');});
 test('erro 401 exige reconexão e mantém os pedidos já importados',async()=>{const x=setup();await x.authorize();x.setHandler(async()=>new Response(null,{status:401}));await assert.rejects(x.service.sync('owner','a'));assert.equal((await x.service.status('owner')).connections[0].status,'reconnect');});
 test('frete com apenas parte das unidades fica pendente',async()=>{const x=setup();await x.authorize();x.setHandler(async url=>{if(url.pathname.endsWith('/discounts'))return Response.json({details:[]});if(url.pathname==='/orders/search')return Response.json({paging:{total:1,offset:0},results:[{...order(),order_items:[{...order().order_items[0],quantity:2}]}]});if(url.pathname==='/shipments/789')return Response.json({id:789,logistic:{type:'drop_off'}});if(url.pathname.endsWith('/items'))return Response.json([{order_id:100,sender_id:456,item_id:'MLB123',variation_id:null,quantity:1}]);if(url.pathname.endsWith('/discounts'))return Response.json({details:[]});return Response.json({senders:[{user_id:456,cost:10}]})});await x.service.sync('owner','a');assert.equal(JSON.parse(String(x.sqlite.prepare('SELECT data FROM meli_orders').get()?.data))[0].shippingCents,null);});
-test('descontos de campanha são consultados mesmo sem sinal no pedido',async()=>{const x=setup();await x.authorize();x.setHandler(async url=>{if(url.pathname==='/orders/search')return Response.json({paging:{total:1,offset:0},results:[{...order(),shipping:null}]});if(url.pathname.endsWith('/discounts'))return Response.json({details:[{type:'cashback',items:[{id:'MLB123',quantity:1,amounts:{total:5,seller:0}}]}]});throw Error(url.pathname)});await x.service.sync('owner','a');assert.equal(JSON.parse(String(x.sqlite.prepare('SELECT data FROM meli_orders').get()?.data))[0].revenueCents,null);});
+test('descontos de campanha são consultados mesmo sem sinal no pedido',async()=>{const x=setup();await x.authorize();x.setHandler(async url=>{if(url.pathname==='/orders/search')return Response.json({paging:{total:1,offset:0},results:[{...order(),shipping:null}]});if(url.pathname.endsWith('/discounts'))return Response.json({details:[{type:'cashback',items:[{id:'MLB123',quantity:1,amounts:{total:5,seller:0}}]}]});throw Error(url.pathname)});await x.service.sync('owner','a');const saved=JSON.parse(String(x.sqlite.prepare('SELECT data FROM meli_orders').get()?.data))[0];assert.equal(saved.revenueCents,10000);assert.equal(saved.otherCents,0);});
+test('parcela de desconto do vendedor vira despesa sem incluir subsídio',async()=>{
+ const x=setup();await x.authorize();
+ x.setHandler(async url=>{
+  if(url.pathname==='/orders/search')return Response.json({paging:{total:1,offset:0},results:[{...order(),shipping:null}]});
+  if(url.pathname.endsWith('/discounts'))return Response.json({details:[{type:'coupon',items:[{id:'MLB123',quantity:1,amounts:{total:8,seller:3}}]}]});
+  throw Error(url.pathname);
+ });
+ await x.service.sync('owner','a');const saved=JSON.parse(String(x.sqlite.prepare('SELECT data FROM meli_orders').get()?.data))[0];
+ assert.equal(saved.revenueCents,10000);assert.equal(saved.otherCents,300);
+});
 test('erro do provedor registra diagnóstico sem tokens ou parâmetros privados',async()=>{
  const x=setup();const logs:unknown[][]=[];const original=console.error;console.error=(...args)=>{logs.push(args)};
  x.setHandler(async()=>Response.json({error:'invalid_limit',message:'Invalid limit; secret-token-example',access_token:'secret-token-example',buyer:{email:'private@example.test'}},{status:400}));
@@ -84,16 +94,49 @@ test('depois do histórico busca somente alterações com sobreposição horári
  assert.equal(result.mode,'incremental');assert.equal(x.sqlite.prepare('SELECT count(*) AS n FROM meli_orders').get()?.n,1);
 });
 test('nova versão do faturamento relê o histórico uma vez e depois volta ao incremental',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=1");const fields:string[]=[];
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=1,logistics_version=2,financials_version=2");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
  const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT gross_sales_version FROM meli_connections').get()?.gross_sales_version,2);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
 });
 test('nova versão logística relê o histórico uma vez e depois volta ao incremental',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=1");const fields:string[]=[];
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=1,financials_version=2");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
  const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT logistics_version FROM meli_connections').get()?.logistics_version,2);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
+});
+test('nova versão financeira relê o histórico uma vez e depois volta ao incremental',async()=>{
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=1");const fields:string[]=[];
+ x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
+ const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,2);
+ x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
+});
+test('catálogo retoma da página salva, preserva antigos na falha e isola geração',async()=>{
+ const x=setup();await x.authorize();let failSecond=true;
+ x.sqlite.exec("INSERT INTO meli_listings VALUES('old','owner','a','MLB-OLD','','Antigo','active',NULL,'old-run',1)");
+ const details=new Map([
+  ['MLB1',{id:'MLB1',seller_id:456,title:'Primeiro',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]}],
+  ['MLB2',{id:'MLB2',seller_id:456,title:'Segundo',status:'paused',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[{id:21,seller_custom_field:'SKU-21',attributes:[]}]}],
+  ['MLB3',{id:'MLB3',seller_id:456,title:'Terceiro',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]}],
+ ]);
+ x.setHandler(async url=>{
+  if(url.pathname==='/users/456/items/search'){
+   const offset=Number(url.searchParams.get('offset'));if(offset===2&&failSecond)return new Response(null,{status:503});
+   return Response.json({seller_id:456,paging:{total:3,offset,limit:2},results:offset===0?['MLB1','MLB2']:['MLB3']});
+  }
+  if(url.pathname==='/items/bulk'){
+   return Response.json(String(url.searchParams.get('ids')).split(',').map(id=>({id,status_code:200,body:details.get(id)})));
+  }
+  throw Error(url.pathname);
+ });
+ const first=await x.service.syncCatalog('owner','a');assert.equal(first.status,'running');assert.equal(first.processed,2);
+ assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_listings WHERE account_id=\'a\'').get()?.n,3);
+ await assert.rejects(x.service.syncCatalog('owner','a'));assert.equal(x.sqlite.prepare("SELECT offset FROM meli_catalog_runs WHERE account_id='a'").get()?.offset,2);
+ assert.equal(x.sqlite.prepare("SELECT status FROM meli_listings WHERE id='old'").get()?.status,'active');
+ await assert.rejects(x.service.syncCatalog('owner','a','wrong-generation'));
+ failSecond=false;const completed=await x.service.syncCatalog('owner','a');assert.equal(completed.status,'complete');assert.equal(completed.processed,3);
+ assert.equal(x.sqlite.prepare("SELECT status FROM meli_listings WHERE id='old'").get()?.status,'inactive');
+ assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_listings WHERE owner_id='other'").get()?.n,0);
 });
 test('falha incremental conserva cursor, período e offset até concluir',async()=>{
  const x=setup();await x.authorize();
@@ -108,14 +151,14 @@ test('falha incremental conserva cursor, período e offset até concluir',async(
  assert.equal(x.sqlite.prepare('SELECT sync_cursor FROM meli_connections').get()?.sync_cursor,'2026-09-15T18:00:00.000Z');
 });
 test('janela incremental atrasada inclui sobreposição dentro de 24 horas',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=2");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  const result=await x.service.sync('owner','a');
  assert.equal(Date.parse(result.toDate)-Date.parse(result.fromDate),86400000);
  assert.equal(result.needsMore,true);
 });
 test('status preserva recuperação pendente depois de concluir janela intermediária',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=2");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  await x.service.sync('owner','a');assert.equal((await x.service.status('owner')).connections[0].needsMore,true);
  for(let n=0;n<4;n++){const r=await x.service.sync('owner','a');if(!r.needsMore)break;}

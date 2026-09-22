@@ -32,8 +32,19 @@ test('evento divide trava com sincronização manual e desconexão impede escrit
  await jobs.processNext();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_orders').get()?.n,0);
 });
 test('recuperação agenda contas conectadas sem duplicar nem ressuscitar geração antiga',async()=>{
- const x=setup();await x.authorize();const jobs=new MeliJobs(x.service);await jobs.recover();await jobs.recover();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_jobs').get()?.n,1);
+ const x=setup();await x.authorize();const jobs=new MeliJobs(x.service);await jobs.recover();await jobs.recover();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_jobs').get()?.n,2);
  await x.service.disconnect('owner','a');await jobs.processNext();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_jobs').get()?.n,0);
+});
+
+test('fila automática sincroniza catálogo sem duplicar trabalho',async()=>{
+ const x=setup();await x.authorize();const jobs=new MeliJobs(x.service);await jobs.recover();
+ x.setHandler(async url=>{
+  if(url.pathname==='/users/456/items/search')return Response.json({seller_id:456,paging:{total:1,offset:0,limit:50},results:['MLB1']});
+  if(url.pathname==='/items/bulk')return Response.json([{id:'MLB1',status_code:200,body:{id:'MLB1',seller_id:456,title:'Produto',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]}}]);
+  throw Error(url.pathname);
+ });
+ await jobs.processNext();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_listings').get()?.n,1);
+ assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_jobs WHERE resource='catalog'").get()?.n,0);
 });
 
 test('estado automático depende de contato real e sinaliza atraso e recuperação',async()=>{

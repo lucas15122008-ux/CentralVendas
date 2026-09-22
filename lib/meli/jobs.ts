@@ -19,6 +19,7 @@ export class MeliJobs{
   const {db,now}=this.service;
   await db.prepare("INSERT INTO meli_automation_health(id,heartbeat_at) VALUES('bridge',?) ON CONFLICT(id) DO UPDATE SET heartbeat_at=excluded.heartbeat_at").bind(now()).run();
   await db.prepare("INSERT OR IGNORE INTO meli_jobs(id,owner_id,account_id,generation,resource,due_at,updated_at) SELECT account_id||':'||generation||':sync',owner_id,account_id,generation,'sync',?,? FROM meli_connections WHERE status IN ('connected','refreshing')").bind(now(),now()).run();
+  await db.prepare("INSERT OR IGNORE INTO meli_jobs(id,owner_id,account_id,generation,resource,due_at,updated_at) SELECT account_id||':'||generation||':catalog',owner_id,account_id,generation,'catalog',?,? FROM meli_connections WHERE status IN ('connected','refreshing')").bind(now(),now()).run();
  }
  async processNext(){
   const {db,now}=this.service;
@@ -27,8 +28,10 @@ export class MeliJobs{
   const job=await db.prepare("UPDATE meli_jobs SET lease=?,lease_until=? WHERE id=(SELECT j.id FROM meli_jobs j WHERE due_at<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY CASE WHEN resource='sync' THEN 1 ELSE 0 END,due_at,id LIMIT 1) AND (lease_until IS NULL OR lease_until<=?) RETURNING *").bind(lease,now()+90000,now(),now(),now()).first<Job>();
   if(!job)return {pending:false};
   try{
-   const result=job.resource==='sync'?await this.service.sync(job.owner_id,job.account_id,'auto',job.generation):await this.service.processResource(job.owner_id,job.account_id,job.generation,job.resource);
-   const more=!!result&&(result.status!=='complete'||result.needsMore);
+   let more=false;
+   if(job.resource==='sync'){const result=await this.service.sync(job.owner_id,job.account_id,'auto',job.generation);more=result.status!=='complete'||result.needsMore;}
+   else if(job.resource==='catalog'){const result=await this.service.syncCatalog(job.owner_id,job.account_id,job.generation);more=result.status!=='complete';}
+   else await this.service.processResource(job.owner_id,job.account_id,job.generation,job.resource);
    if(!more)await db.prepare('DELETE FROM meli_jobs WHERE id=? AND revision=? AND lease=?').bind(job.id,job.revision,lease).run();
    await db.prepare('UPDATE meli_jobs SET lease=NULL,lease_until=NULL,due_at=?,error=NULL,attempts=0 WHERE id=? AND lease=?').bind(now(),job.id,lease).run();
   }catch(error){
