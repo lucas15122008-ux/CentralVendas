@@ -12,6 +12,16 @@ export type PendingItem={
 function targetKey(accountId:string,itemId:string,variationId:string|null|undefined){return JSON.stringify([accountId,itemId,variationId??null]);}
 function pendingId(kind:PendingKind,values:(string|null|undefined)[]){return ['pending',kind,...values.map(value=>value??'')].join(':');}
 
+const pendingPriority:Record<PendingKind,number>={
+ stale_correction:0,stale_full_closure:1,migration_conflict:2,
+ missing_meli_field:3,unknown_operation:4,missing_full_reference:5,
+ missing_profile:6,missing_cost:7,missing_tax:8,
+};
+
+export function sortPendingItems(items:PendingItem[]){
+ return [...items].sort((a,b)=>pendingPriority[a.kind]-pendingPriority[b.kind]||a.title.localeCompare(b.title,'pt-BR')||a.id.localeCompare(b.id));
+}
+
 export function collectPending(input:{sales:SaleResult[];listings:MeliListing[];migrationIssues:MigrationIssue[]}):PendingItem[]{
  const pending:PendingItem[]=[];
  const seen=new Set<string>();
@@ -55,5 +65,5 @@ export function collectPending(input:{sales:SaleResult[];listings:MeliListing[];
  for(const issue of input.migrationIssues){
   add({id:pendingId('migration_conflict',[issue.accountId,issue.itemId,issue.variationId,issue.code,issue.message]),kind:'migration_conflict',accountId:issue.accountId,itemId:issue.itemId,variationId:issue.variationId,title:`Migração de ${issue.itemId||'venda histórica'}`,message:issue.message,action:'review_migration'});
  }
- return pending.sort((a,b)=>a.kind.localeCompare(b.kind)||a.id.localeCompare(b.id));
+ return sortPendingItems(pending);
 }

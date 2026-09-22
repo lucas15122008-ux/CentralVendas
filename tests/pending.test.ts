@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {collectPending} from '../lib/pending.ts';
+import {collectPending,sortPendingItems,type PendingItem} from '../lib/pending.ts';
 import {calculateSale,groupProducts,summarizeSales,type CostRecord,type Sale,type SaleResult} from '../lib/finance.ts';
 import type {MeliListing} from '../lib/meli/catalog.ts';
 import type {AdProfileEvent} from '../lib/ad-profiles.ts';
@@ -47,6 +47,14 @@ test('custo e imposto zero declarados não criam pendência',()=>{
  const zero=result(sale({adProfile:{eventId:'zero',revision:1,validFrom:'2026-01-01',unitCostTenThousandths:0,tax:{mode:'unit',valueTenThousandths:0}}}));
  const pending=collectPending({sales:[zero],listings:[listing({hasProfile:true})],migrationIssues:[]});
  assert.equal(pending.some(item=>['missing_profile','missing_cost','missing_tax'].includes(item.kind)),false);
+});
+
+test('ordena itens para revisar antes dos dados ausentes',()=>{
+ const item=(kind:PendingItem['kind'],id:string):PendingItem=>({id,kind,accountId,title:id,message:id,action:kind.includes('full')?'review_full':kind==='migration_conflict'?'review_migration':kind==='stale_correction'?'correct_sale':'edit_profile'});
+ const sorted=sortPendingItems([
+  item('missing_profile','perfil'),item('missing_meli_field','campo'),item('stale_full_closure','full'),item('migration_conflict','migração'),item('stale_correction','correção'),
+ ]);
+ assert.deepEqual(sorted.map(row=>row.id),['correção','full','migração','campo','perfil']);
 });
 
 test('projeção ativa usa ficha, API, fechamento e a mesma contribuição em todas as visões',()=>{

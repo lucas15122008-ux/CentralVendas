@@ -1,5 +1,5 @@
 'use client';
-import {useMemo,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {Dialog} from '@/components/ui/dialog';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
@@ -20,8 +20,8 @@ function targetKey(listing:MeliListing){return JSON.stringify([listing.accountId
 function operationLabel(operation:OperationOverride){return operation==='full'?'Full':operation==='other'?'Comum':'Automática';}
 function taxLabel(profile:AdProfileEvent|undefined){const tax=profile?.payload?.tax;if(!tax)return '—';if(tax.mode==='included')return 'Incluído no custo';if(tax.mode==='unit')return `${money(Math.round(tax.valueTenThousandths/100))} / un.`;return `${formatBasisPoints(tax.rateBasisPoints)}%`;}
 
-export function AdProfilesView({listings,profiles,sales,accounts,demo,onReload}:{listings:MeliListing[];profiles:AdProfileEvent[];sales:Sale[];accounts:Account[];demo:boolean;onReload:()=>Promise<void>}){
- const [search,setSearch]=useState('');const [filter,setFilter]=useState<Filter>('all');const [selectedKey,setSelectedKey]=useState<string|null>(null);const [session,setSession]=useState(0);const buttons=useRef(new Map<string,HTMLButtonElement>());const returnKey=useRef<string|null>(null);
+export function AdProfilesView({listings,profiles,sales,accounts,demo,openTarget,onReload}:{listings:MeliListing[];profiles:AdProfileEvent[];sales:Sale[];accounts:Account[];demo:boolean;openTarget?:{accountId:string;itemId:string;variationId?:string|null}|null;onReload:()=>Promise<void>}){
+ const [search,setSearch]=useState('');const [filter,setFilter]=useState<Filter>('all');const [selectedKey,setSelectedKey]=useState<string|null>(null);const [session,setSession]=useState(0);const buttons=useRef(new Map<string,HTMLButtonElement>());const returnKey=useRef<string|null>(null);const openedTarget=useRef('');
  const variationCounts=useMemo(()=>{const map=new Map<string,number>();for(const item of listings){const key=item.accountId+'\0'+item.itemId;map.set(key,(map.get(key)??0)+1)}return map},[listings]);
  const rows=useMemo(()=>listings.map(listing=>{const profile=latestAdProfile(profiles,listing.accountId,listing.itemId,listing.variationId);return {listing,profile,state:profile?.payload?'complete' as const:'pending' as const};}).filter(row=>{
   const haystack=`${row.listing.title} ${row.listing.itemId} ${row.listing.sellerSku??''} ${row.listing.variationId??''} ${accounts.find(account=>account.id===row.listing.accountId)?.name??''}`.toLowerCase();return haystack.includes(search.toLowerCase())&&(filter==='all'||row.state===filter);
@@ -29,6 +29,7 @@ export function AdProfilesView({listings,profiles,sales,accounts,demo,onReload}:
  const selected=listings.find(item=>targetKey(item)===selectedKey);
  function open(listing:MeliListing){const key=targetKey(listing);returnKey.current=key;setSelectedKey(key);setSession(value=>value+1);}
  function close(){setSelectedKey(null);queueMicrotask(()=>{const key=returnKey.current;if(key)buttons.current.get(key)?.focus()});}
+ useEffect(()=>{if(!openTarget)return;const key=JSON.stringify([openTarget.accountId,openTarget.itemId,openTarget.variationId??null]);if(openedTarget.current===key)return;const item=listings.find(listing=>targetKey(listing)===key);if(item){openedTarget.current=key;setFilter('all');setSearch(item.itemId);open(item)}},[openTarget,listings]);
  const completed=listings.filter(item=>latestAdProfile(profiles,item.accountId,item.itemId,item.variationId)?.payload).length;
  return <><div className="ad-profile-stats"><section><span>Anúncios e variações</span><strong>{listings.length.toLocaleString('pt-BR')}</strong></section><section><span>Fichas completas</span><strong>{completed.toLocaleString('pt-BR')}</strong></section><section><span>Pedem custo ou imposto</span><strong>{(listings.length-completed).toLocaleString('pt-BR')}</strong></section></div>
   <section className="panel"><div className="panel-heading ad-profile-heading"><div><h2>Fichas financeiras por anúncio</h2><p>Custo e imposto ficam salvos por anúncio e vigência; o Mercado Livre fornece os demais valores.</p></div><div className="ad-profile-tools"><Choice label="Situação da ficha" value={filter} onChange={value=>setFilter(value as Filter)} options={[{value:'all',label:'Todos'},{value:'complete',label:'Completos'},{value:'pending',label:'Pendentes'}]}/><div className="search-field"><Search size={17}/><Input aria-label="Buscar anúncios" placeholder="Anúncio, SKU ou item" value={search} onChange={event=>setSearch(event.target.value)}/></div></div></div>
