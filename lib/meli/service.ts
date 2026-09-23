@@ -195,7 +195,7 @@ export class MeliService {
   const guard="EXISTS(SELECT 1 FROM meli_catalog_runs r JOIN meli_connections c ON c.account_id=r.account_id AND c.owner_id=r.owner_id WHERE r.account_id=? AND r.owner_id=? AND r.id=? AND r.lease=? AND r.generation=c.generation AND c.status='connected' AND r.lease_until>?) AND "+accountGuard.sql;
   const guardValues=()=>[id,owner,run.id,lease,this.now(),...accountGuard.values()];
   try{
-   const query=new URLSearchParams({limit:'50',offset:String(run.offset)});
+   const query=new URLSearchParams({limit:'20',offset:String(run.offset)});
    const search=await this.remote('/users/'+c.seller_id+'/items/search?'+query,token);
    const parsedSearch=z.object({seller_id:remoteId,paging:z.object({total:z.number().int().nonnegative(),offset:z.number().int().nonnegative(),limit:z.number().int().positive()}),results:z.array(z.string()).max(50)}).safeParse(search);
    if(!parsedSearch.success||parsedSearch.data.seller_id!==c.seller_id||parsedSearch.data.paging.offset!==run.offset)throw new MeliError(502,'O Mercado Livre retornou um catálogo incompleto.');

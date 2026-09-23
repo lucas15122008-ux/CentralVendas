@@ -121,6 +121,7 @@ test('catálogo retoma da página salva, preserva antigos na falha e isola gera�
  ]);
  x.setHandler(async url=>{
   if(url.pathname==='/users/456/items/search'){
+   assert.equal(url.searchParams.get('limit'),'20');
    const offset=Number(url.searchParams.get('offset'));if(offset===2&&failSecond)return new Response(null,{status:503});
    return Response.json({seller_id:456,paging:{total:3,offset,limit:2},results:offset===0?['MLB1','MLB2']:['MLB3']});
   }
