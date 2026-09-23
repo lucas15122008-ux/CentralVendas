@@ -204,7 +204,13 @@ export class MeliService {
     ?await this.remote('/items/bulk?'+new URLSearchParams({ids:parsedSearch.data.results.join(','),attributes:'body.id,body.seller_id,body.title,body.status,body.last_updated,body.seller_custom_field,body.attributes,body.variations'}),token)
     :[];
    let listings;
-   try{listings=parseCatalogPage(search,items,id);}catch{throw new MeliError(502,'O Mercado Livre retornou anúncios incompletos.');}
+   try{listings=parseCatalogPage(search,items,id);}catch(error){
+    const reason=error instanceof z.ZodError
+     ?error.issues.slice(0,5).map(issue=>({path:issue.path.join('.'),code:issue.code}))
+     :error instanceof Error?error.message:'unknown';
+    console.error('meli_catalog_parse_error',{reason});
+    throw new MeliError(502,'O Mercado Livre retornou anúncios incompletos.');
+   }
    const statements=listings.map(listing=>this.db.prepare(`INSERT INTO meli_listings(id,owner_id,account_id,item_id,variation_id,title,status,seller_sku,seen_generation,updated_at)
     SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${guard}
     ON CONFLICT(owner_id,account_id,item_id,variation_id) DO UPDATE SET title=excluded.title,status=excluded.status,seller_sku=excluded.seller_sku,seen_generation=excluded.seen_generation,updated_at=excluded.updated_at`)
