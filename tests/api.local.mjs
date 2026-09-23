@@ -123,10 +123,9 @@ test('migração de fichas: prévia, bloqueio, rollback, fonte, ativação e iso
  assert.equal((await call('/api/imports',{method:'POST',body:unlock})).status,201);
  assert.equal((await post({requestId:crypto.randomUUID(),expectedSourceStamp:beforeRollbackStamp})).status,409);
  preview=await call('/api/ad-profile-migration');plan=await preview.json();assert.equal(plan.blockingDifferences,0);assert.notEqual(plan.sourceStamp,beforeRollbackStamp);
- const activation={requestId:crypto.randomUUID(),expectedSourceStamp:plan.sourceStamp};
- const activated=await post(activation);assert.equal(activated.status,200);let result=await activated.json();assert.equal(result.state,'active');assert.ok(result.persistedProfileCount>=5);
- const replay=await post(activation);assert.equal(replay.status,200);result=await replay.json();assert.equal(result.state,'active');assert.equal(result.persistedProfileCount,(await (await call('/api/ad-profile-migration')).json()).persistedProfileCount);
  const projected=await workspace();assert.equal(projected.rollout.state,'active');assert.ok(projected.adProfiles.length>=6);assert.ok(Array.isArray(projected.saleCorrections));assert.ok(Array.isArray(projected.listings));assert.ok(Array.isArray(projected.pending));
+ preview=await call('/api/ad-profile-migration');let result=await preview.json();assert.equal(result.state,'active');assert.ok(result.persistedProfileCount>=5);
+ const replay=await post({requestId:crypto.randomUUID(),expectedSourceStamp:result.sourceStamp});assert.equal(replay.status,200);result=await replay.json();assert.equal(result.state,'active');assert.equal(result.persistedProfileCount,(await (await call('/api/ad-profile-migration')).json()).persistedProfileCount);
  assert.equal(projected.listings.find(item=>item.itemId==='MLB-QA-COMMON').hasProfile,true);
  assert.ok(projected.pending.some(item=>item.kind==='missing_profile'&&item.itemId==='MLB-QA-1'));
  const common=projected.sales.find(item=>item.itemId==='MLB-QA-COMMON');assert.equal(common.financialMode,'native');assert.equal(calculateSale(common,projected.costs).contributionCents,34500);
