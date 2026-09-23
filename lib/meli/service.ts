@@ -55,7 +55,7 @@ export class MeliService {
   // Workers supports manual/follow only. Manual redirects reach the non-2xx rejection below;
   // credentials are never forwarded to the Location target.
   let response:Response;
-  try{response=await this.fetcher('https://api.mercadolibre.com'+path,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Accept:'application/json','x-format-new':'true',...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:body.toString()}:{})});}catch{throw new MeliError(502,'O Mercado Livre não respondeu. Tente retomar a atualização.');}
+  try{response=await this.fetcher('https://api.mercadolibre.com'+path,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Accept:'application/json',...(!path.startsWith('/items/bulk?')?{'x-format-new':'true'}:{}),...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:body.toString()}:{})});}catch{throw new MeliError(502,'O Mercado Livre não respondeu. Tente retomar a atualização.');}
   if(!response.ok){
    const status=response.status;
    // Free-form errors can echo credentials or query values. Log only known error identifiers.

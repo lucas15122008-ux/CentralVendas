@@ -84,6 +84,18 @@ test('diagnóstico não registra mensagens livres ou códigos que possam repetir
  try{await assert.rejects(x.service.remote('/oauth/token',undefined,new URLSearchParams({code_verifier:'private-verifier'})));}finally{console.error=original;}
  assert.equal(logs.length,1);assert.deepEqual(logs[0][1],{resource:'/oauth/token',status:400,code:'unrecognized_error'});
 });
+test('consulta bulk de anúncios não envia o formato novo exclusivo de envios',async()=>{
+ const x=setup();const headers:Record<string,string|null>={bulk:null,shipment:null};
+ x.setHandler(async(url,init)=>{
+  const value=new Headers(init?.headers).get('x-format-new');
+  if(url.pathname==='/items/bulk'){headers.bulk=value;return Response.json([])}
+  if(url.pathname==='/shipments/1'){headers.shipment=value;return Response.json({})}
+  throw Error(url.pathname);
+ });
+ await x.service.remote('/items/bulk?ids=MLB1','token');
+ await x.service.remote('/shipments/1','token');
+ assert.deepEqual(headers,{bulk:null,shipment:'true'});
+});
 test('depois do histórico busca somente alterações com sobreposição horária',async()=>{
  const x=setup();await x.authorize();let query=new URLSearchParams();
  x.setHandler(async url=>{if(url.pathname.endsWith('/discounts'))return Response.json({details:[]});query=url.searchParams;return Response.json({paging:{total:1,offset:0},results:[{...order(),shipping:null}]})});
