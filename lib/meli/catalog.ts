@@ -34,7 +34,7 @@ const searchSchema=z.object({
  paging:z.object({total:z.number().int().nonnegative(),offset:z.number().int().nonnegative(),limit:z.number().int().positive()}),
  results:z.array(z.string().min(1).max(100)).max(50),
 });
-const bulkEntry=z.object({id:z.string().min(1).max(100),status_code:z.literal(200),body:item});
+const bulkEntry=z.object({id:z.string().min(1).max(100),status_code:z.number().int(),body:z.unknown().optional()});
 
 function sku(attributes:z.infer<typeof attribute>[],fallback:string|null|undefined){
  return attributes.find(value=>value.id==='SELLER_SKU')?.value_name?.trim()||fallback?.trim()||null;
@@ -48,7 +48,10 @@ export function parseCatalogPage(searchInput:unknown,itemsInput:unknown,accountI
  if(byId.size!==entries.length||search.results.some(id=>!byId.has(id)))throw new Error('Catálogo inconsistente.');
  const listings:MeliListing[]=[];
  for(const expectedId of search.results){
-  const body=byId.get(expectedId)!.body;
+  const entry=byId.get(expectedId)!;
+  if(entry.status_code===403||entry.status_code===404)continue;
+  if(entry.status_code!==200)throw new Error('Detalhe do anúncio indisponível temporariamente.');
+  const body=item.parse(entry.body);
   if(body.id!==expectedId||body.seller_id!==search.seller_id)throw new Error('Anúncio de outro vendedor.');
   const updatedAt=Date.parse(body.last_updated);
   if(body.variations.length){

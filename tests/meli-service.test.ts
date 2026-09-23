@@ -139,6 +139,15 @@ test('catálogo retoma da página salva, preserva antigos na falha e isola gera�
  assert.equal(x.sqlite.prepare("SELECT status FROM meli_listings WHERE id='old'").get()?.status,'inactive');
  assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_listings WHERE owner_id='other'").get()?.n,0);
 });
+test('sincronização concluída libera nova tentativa do catálogo em espera',async()=>{
+ const x=setup();await x.authorize();
+ const generation=String(x.sqlite.prepare("SELECT generation FROM meli_connections WHERE account_id='a'").get()?.generation);
+ x.sqlite.prepare("INSERT INTO meli_jobs(id,owner_id,account_id,generation,resource,attempts,due_at,error,updated_at) VALUES(?,?,?,?,?,7,9999999999999,'Falha antiga',1)").run('a:'+generation+':catalog','owner','a',generation,'catalog');
+ x.setHandler(async url=>{assert.equal(url.pathname,'/orders/search');return Response.json({paging:{total:0,offset:0},results:[]})});
+ await x.service.sync('owner','a');
+ const job=x.sqlite.prepare("SELECT attempts,due_at,error FROM meli_jobs WHERE resource='catalog'").get();
+ assert.equal(job?.attempts,0);assert.equal(job?.error,null);assert.ok(Number(job?.due_at)<9999999999999);
+});
 test('falha incremental conserva cursor, período e offset até concluir',async()=>{
  const x=setup();await x.authorize();
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));await x.service.sync('owner','a');x.advance(2*3600000);

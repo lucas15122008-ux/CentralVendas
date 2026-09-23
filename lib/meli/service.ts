@@ -274,7 +274,9 @@ export class MeliService {
    const offset=run.offset+search.data.results.length,total=search.data.paging.total,status=offset>=total?'complete':'running';
    const needsMore=status==='complete'&&Date.parse(run.to_date)<this.now();
    if(status==='complete')statements.push(this.db.prepare(`UPDATE meli_connections SET synced_at=CASE WHEN ?=1 THEN synced_at ELSE ? END,sync_cursor=CASE WHEN sync_cursor IS NULL OR sync_cursor<? THEN ? ELSE sync_cursor END WHERE account_id=? AND owner_id=? AND ${guard}`).bind(needsMore?1:0,this.now(),run.to_date,run.to_date,id,owner,...guardValues()));
-   if(status==='complete')statements.push(this.db.prepare(`INSERT OR IGNORE INTO meli_jobs(id,owner_id,account_id,generation,resource,due_at,updated_at) SELECT ?,?,?,?,?,?,? WHERE ${guard}`).bind(id+':'+c.generation+':catalog',owner,id,c.generation,'catalog',this.now(),this.now(),...guardValues()));
+   if(status==='complete')statements.push(this.db.prepare(`INSERT INTO meli_jobs(id,owner_id,account_id,generation,resource,due_at,updated_at) SELECT ?,?,?,?,?,?,? WHERE ${guard}
+    ON CONFLICT(id) DO UPDATE SET due_at=MIN(meli_jobs.due_at,excluded.due_at),attempts=0,error=NULL,updated_at=excluded.updated_at
+    WHERE meli_jobs.owner_id=excluded.owner_id AND meli_jobs.account_id=excluded.account_id AND meli_jobs.generation=excluded.generation AND meli_jobs.resource='catalog' AND meli_jobs.lease IS NULL`).bind(id+':'+c.generation+':catalog',owner,id,c.generation,'catalog',this.now(),this.now(),...guardValues()));
    statements.push(this.db.prepare(`UPDATE meli_sync_runs SET offset=?,total=?,status=?,needs_more=?,lease=NULL,lease_until=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND ${guard} RETURNING *`).bind(offset,total,status,needsMore?1:0,this.now(),id,owner,...guardValues()));
    const saved=await this.db.batch(statements);if(!saved.at(-1)?.results.length)throw new MeliError(409,'A atualização foi cancelada ou substituída. Os dados anteriores foram preservados.');
    return {status,mode:run.mode,needsMore,processed:offset,total,fromDate:run.from_date,toDate:run.to_date};

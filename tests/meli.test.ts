@@ -70,3 +70,10 @@ test('catálogo recusa resposta malformada e item de outro vendedor',()=>{
  assert.throws(()=>parseCatalogPage(search,[{id:'MLB1',status_code:200,body:{...body,title:undefined}}],'a'));
  assert.throws(()=>parseCatalogPage(search,[{id:'MLB1',status_code:200,body:{...body,seller_id:999}}],'a'));
 });
+test('catálogo ignora detalhe indisponível sem aceitar falha ou item ausente',()=>{
+ const search={seller_id:456,paging:{total:2,offset:0,limit:20},results:['MLB1','MLB2']};
+ const body={id:'MLB1',seller_id:456,title:'Produto',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]};
+ assert.deepEqual(parseCatalogPage(search,[{id:'MLB1',status_code:200,body},{id:'MLB2',status_code:404}],'a').map(row=>row.itemId),['MLB1']);
+ assert.throws(()=>parseCatalogPage(search,[{id:'MLB1',status_code:200,body},{id:'MLB2',status_code:500}],'a'));
+ assert.throws(()=>parseCatalogPage(search,[{id:'MLB1',status_code:200,body}],'a'));
+});
