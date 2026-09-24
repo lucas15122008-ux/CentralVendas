@@ -47,6 +47,18 @@ test('fila automática sincroniza catálogo sem duplicar trabalho',async()=>{
  assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_jobs WHERE resource='catalog'").get()?.n,0);
 });
 
+test('recuperação não reinicia catálogo recém-concluído e atualiza depois do intervalo',async()=>{
+ const x=setup();await x.authorize();const jobs=new MeliJobs(x.service);await jobs.recover();
+ x.setHandler(async url=>{
+  if(url.pathname==='/users/456/items/search')return Response.json({seller_id:456,paging:{total:1,limit:100},scroll_id:'cursor-1',results:['MLB1']});
+  if(url.pathname==='/items/bulk')return Response.json([{body:{id:'MLB1',seller_id:456,title:'Produto',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]}}]);
+  throw Error(url.pathname);
+ });
+ await jobs.processNext();
+ await jobs.recover();assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_jobs WHERE resource='catalog'").get()?.n,0);
+ x.advance(3600001);await jobs.recover();assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_jobs WHERE resource='catalog'").get()?.n,1);
+});
+
 test('estado automático depende de contato real e sinaliza atraso e recuperação',async()=>{
  const x=setup();await x.authorize();const jobs=new MeliJobs(x.service);
  assert.equal((await x.service.status('owner',true)).automation.state,'pending');

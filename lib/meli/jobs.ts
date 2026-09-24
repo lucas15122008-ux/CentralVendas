@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {remoteId} from './protocol.ts';
 import {randomToken} from './crypto.ts';
-import {MeliError,MeliService} from './service.ts';
+import {CATALOG_REFRESH_MS,MeliError,MeliService} from './service.ts';
 export const notificationSchema=z.object({application_id:remoteId,user_id:remoteId,topic:z.enum(['orders_v2','shipments']),resource:z.string().max(100)}).refine(v=>new RegExp('^/'+(v.topic==='orders_v2'?'orders':'shipments')+'/[0-9]{1,30}$').test(v.resource));
 type Job={id:string;owner_id:string;account_id:string;generation:string;resource:string;revision:number;attempts:number;lease:string};
 export class MeliJobs{
@@ -19,7 +19,7 @@ export class MeliJobs{
   const {db,now}=this.service;
   await db.prepare("INSERT INTO meli_automation_health(id,heartbeat_at) VALUES('bridge',?) ON CONFLICT(id) DO UPDATE SET heartbeat_at=excluded.heartbeat_at").bind(now()).run();
   await db.prepare("INSERT OR IGNORE INTO meli_jobs(id,owner_id,account_id,generation,resource,due_at,updated_at) SELECT account_id||':'||generation||':sync',owner_id,account_id,generation,'sync',?,? FROM meli_connections WHERE status IN ('connected','refreshing')").bind(now(),now()).run();
-  await db.prepare("INSERT OR IGNORE INTO meli_jobs(id,owner_id,account_id,generation,resource,due_at,updated_at) SELECT account_id||':'||generation||':catalog',owner_id,account_id,generation,'catalog',?,? FROM meli_connections WHERE status IN ('connected','refreshing')").bind(now(),now()).run();
+  await db.prepare("INSERT OR IGNORE INTO meli_jobs(id,owner_id,account_id,generation,resource,due_at,updated_at) SELECT c.account_id||':'||c.generation||':catalog',c.owner_id,c.account_id,c.generation,'catalog',?,? FROM meli_connections c WHERE c.status IN ('connected','refreshing') AND NOT EXISTS(SELECT 1 FROM meli_catalog_runs r WHERE r.account_id=c.account_id AND r.owner_id=c.owner_id AND r.generation=c.generation AND r.status='complete' AND r.updated_at>?)").bind(now(),now(),now()-CATALOG_REFRESH_MS).run();
  }
  async processNext(){
   const {db,now}=this.service;

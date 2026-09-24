@@ -178,6 +178,16 @@ test('sincronização concluída libera nova tentativa do catálogo em espera',a
  const job=x.sqlite.prepare("SELECT attempts,due_at,error FROM meli_jobs WHERE resource='catalog'").get();
  assert.equal(job?.attempts,0);assert.equal(job?.error,null);assert.ok(Number(job?.due_at)<9999999999999);
 });
+test('sincronização não agenda nova leitura de catálogo recém-concluído',async()=>{
+ const x=setup();await x.authorize();
+ x.setHandler(async url=>{
+  if(url.pathname==='/users/456/items/search')return Response.json({seller_id:456,paging:{total:0,limit:100},scroll_id:'cursor-1',results:[]});
+  if(url.pathname==='/orders/search')return Response.json({paging:{total:0,offset:0},results:[]});
+  throw Error(url.pathname);
+ });
+ await x.service.syncCatalog('owner','a');await x.service.sync('owner','a');
+ assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_jobs WHERE resource='catalog'").get()?.n,0);
+});
 test('catálogo reinicia progresso antigo sem cursor no modo scan',async()=>{
  const x=setup();await x.authorize();
  const generation=String(x.sqlite.prepare("SELECT generation FROM meli_connections WHERE account_id='a'").get()?.generation);
