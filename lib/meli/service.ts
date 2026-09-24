@@ -199,9 +199,9 @@ export class MeliService {
   const guard="EXISTS(SELECT 1 FROM meli_catalog_runs r JOIN meli_connections c ON c.account_id=r.account_id AND c.owner_id=r.owner_id WHERE r.account_id=? AND r.owner_id=? AND r.id=? AND r.lease=? AND r.generation=c.generation AND c.status='connected' AND r.lease_until>?) AND "+accountGuard.sql;
   const guardValues=()=>[id,owner,run.id,lease,this.now(),...accountGuard.values()];
   try{
-   const query=new URLSearchParams({limit:'20',search_type:'scan',...(run.scroll_id?{scroll_id:run.scroll_id}:{})});
+   const query=new URLSearchParams({limit:'100',search_type:'scan',...(run.scroll_id?{scroll_id:run.scroll_id}:{})});
    const search=await this.remote('/users/'+c.seller_id+'/items/search?'+query,token);
-   const parsedSearch=z.object({seller_id:remoteId,paging:z.object({total:z.number().int().nonnegative(),limit:z.number().int().positive()}).passthrough().optional(),scroll_id:z.string().min(1).max(10000).nullable().optional(),results:z.array(z.string().min(1).max(100)).max(20).nullable()}).safeParse(search);
+   const parsedSearch=z.object({seller_id:remoteId,paging:z.object({total:z.number().int().nonnegative(),limit:z.number().int().positive()}).passthrough().optional(),scroll_id:z.string().min(1).max(10000).nullable().optional(),results:z.array(z.string().min(1).max(100)).max(100).nullable()}).safeParse(search);
    if(!parsedSearch.success||parsedSearch.data.seller_id!==c.seller_id)throw new MeliError(502,'O Mercado Livre retornou um catálogo incompleto.');
    const reportedTotal=parsedSearch.data.paging?.total;
    if(run.total!==null&&reportedTotal!==undefined&&reportedTotal!==run.total)throw new MeliError(502,'A lista de anúncios mudou durante a leitura.');
@@ -212,25 +212,28 @@ export class MeliService {
    if(!ended&&!results.length&&run.offset<total)throw new MeliError(502,'A lista de anúncios mudou durante a leitura.');
    const nextScroll=parsedSearch.data.scroll_id??run.scroll_id;
    if(!ended&&run.offset+results.length<total&&!nextScroll)throw new MeliError(502,'O Mercado Livre não informou a continuação do catálogo.');
-   const items=results.length
-    ?await this.remote('/items/bulk?'+new URLSearchParams({ids:results.join(','),attributes:'body.id,body.seller_id,body.title,body.status,body.last_updated,body.seller_custom_field,body.attributes,body.variations'}),token)
-    :[];
-   let listings;
-   try{listings=parseCatalogPage({seller_id:parsedSearch.data.seller_id,paging:{total,offset:run.offset,limit:Math.max(1,results.length)},results},items,id);}catch(error){
-    const first=Array.isArray(items)&&items[0]&&typeof items[0]==='object'&&!Array.isArray(items[0])?items[0] as Record<string,unknown>:null;
-    const body=first?.body&&typeof first.body==='object'&&!Array.isArray(first.body)?first.body as Record<string,unknown>:null;
-    const safeKeys=(value:Record<string,unknown>|null)=>value?Object.keys(value).filter(key=>/^[a-z_]{1,40}$/i.test(key)).slice(0,20):[];
-    const reason=error instanceof z.ZodError
-     ?error.issues.slice(0,5).map(issue=>({path:issue.path.join('.'),code:issue.code}))
-     :error instanceof Error?error.message:'unknown';
-    console.error('meli_catalog_parse_error',{reason,entryKeys:safeKeys(first),bodyKeys:safeKeys(body)});
-    throw new MeliError(502,'O Mercado Livre retornou anúncios incompletos.');
+   const listings:ReturnType<typeof parseCatalogPage>=[];
+   for(let start=0;start<results.length;start+=20){
+    const chunk=results.slice(start,start+20);
+    const items=await this.remote('/items/bulk?'+new URLSearchParams({ids:chunk.join(','),attributes:'body.id,body.seller_id,body.title,body.status,body.last_updated,body.seller_custom_field,body.attributes,body.variations'}),token);
+    try{listings.push(...parseCatalogPage({seller_id:parsedSearch.data.seller_id,paging:{total,offset:run.offset+start,limit:chunk.length},results:chunk},items,id));}catch(error){
+     const first=Array.isArray(items)&&items[0]&&typeof items[0]==='object'&&!Array.isArray(items[0])?items[0] as Record<string,unknown>:null;
+     const body=first?.body&&typeof first.body==='object'&&!Array.isArray(first.body)?first.body as Record<string,unknown>:null;
+     const safeKeys=(value:Record<string,unknown>|null)=>value?Object.keys(value).filter(key=>/^[a-z_]{1,40}$/i.test(key)).slice(0,20):[];
+     const reason=error instanceof z.ZodError
+      ?error.issues.slice(0,5).map(issue=>({path:issue.path.join('.'),code:issue.code}))
+      :error instanceof Error?error.message:'unknown';
+     console.error('meli_catalog_parse_error',{reason,entryKeys:safeKeys(first),bodyKeys:safeKeys(body)});
+     throw new MeliError(502,'O Mercado Livre retornou anúncios incompletos.');
+    }
    }
-   const statements=listings.map(listing=>this.db.prepare(`INSERT INTO meli_listings(id,owner_id,account_id,item_id,variation_id,title,status,seller_sku,seen_generation,updated_at)
+   const listingStatements=listings.map(listing=>this.db.prepare(`INSERT INTO meli_listings(id,owner_id,account_id,item_id,variation_id,title,status,seller_sku,seen_generation,updated_at)
     SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${guard}
     ON CONFLICT(owner_id,account_id,item_id,variation_id) DO UPDATE SET title=excluded.title,status=excluded.status,seller_sku=excluded.seller_sku,seen_generation=excluded.seen_generation,updated_at=excluded.updated_at`)
     .bind(listing.id,owner,id,listing.itemId,listing.variationId??'',listing.title,listing.status,listing.sellerSku,run.id,listing.updatedAt,...guardValues()));
+   for(let start=0;start<listingStatements.length;start+=50)await this.db.batch(listingStatements.slice(start,start+50));
    const offset=run.offset+results.length,status:CatalogRun['status']=ended||offset>=total?'complete':'running';
+   const statements=[];
    if(status==='complete')statements.push(this.db.prepare(`UPDATE meli_listings SET status='inactive',updated_at=? WHERE owner_id=? AND account_id=? AND seen_generation<>? AND ${guard}`).bind(this.now(),owner,id,run.id,...guardValues()));
    statements.push(this.db.prepare(`UPDATE meli_catalog_runs SET offset=?,total=?,scroll_id=?,status=?,lease=NULL,lease_until=NULL,error=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND ${guard} RETURNING account_id`).bind(offset,total,status==='complete'?null:nextScroll,status,this.now(),id,owner,...guardValues()));
    const saved=await this.db.batch(statements);

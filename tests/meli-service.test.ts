@@ -133,7 +133,7 @@ test('catálogo retoma da página salva, preserva antigos na falha e isola gera�
  ]);
  x.setHandler(async url=>{
   if(url.pathname==='/users/456/items/search'){
-   assert.equal(url.searchParams.get('limit'),'20');
+   assert.equal(url.searchParams.get('limit'),'100');
    assert.equal(url.searchParams.get('search_type'),'scan');assert.equal(url.searchParams.has('offset'),false);
    const scroll=url.searchParams.get('scroll_id');
    if(!scroll)return Response.json({seller_id:456,paging:{total:3,limit:2},scroll_id:'cursor-1',results:['MLB1','MLB2']});
@@ -154,6 +154,20 @@ test('catálogo retoma da página salva, preserva antigos na falha e isola gera�
  failSecond=false;const completed=await x.service.syncCatalog('owner','a');assert.equal(completed.status,'complete');assert.equal(completed.processed,3);
  assert.equal(x.sqlite.prepare("SELECT status FROM meli_listings WHERE id='old'").get()?.status,'inactive');
  assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_listings WHERE owner_id='other'").get()?.n,0);
+});
+test('catálogo divide uma página scan de cem IDs em detalhes de vinte',async()=>{
+ const x=setup();await x.authorize();const ids=Array.from({length:45},(_,index)=>'MLB'+(index+1));const chunks:number[]=[];
+ x.setHandler(async url=>{
+  if(url.pathname==='/users/456/items/search')return Response.json({seller_id:456,paging:{total:45,limit:100},scroll_id:'cursor-1',results:ids});
+  if(url.pathname==='/items/bulk'){
+   const requested=String(url.searchParams.get('ids')).split(',');chunks.push(requested.length);
+   return Response.json(requested.map(id=>({body:{id,seller_id:456,title:'Produto '+id,status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]}})));
+  }
+  throw Error(url.pathname);
+ });
+ const result=await x.service.syncCatalog('owner','a');
+ assert.deepEqual(result,{status:'complete',processed:45,total:45});assert.deepEqual(chunks,[20,20,5]);
+ assert.equal(x.sqlite.prepare("SELECT count(*) n FROM meli_listings WHERE account_id='a'").get()?.n,45);
 });
 test('sincronização concluída libera nova tentativa do catálogo em espera',async()=>{
  const x=setup();await x.authorize();
