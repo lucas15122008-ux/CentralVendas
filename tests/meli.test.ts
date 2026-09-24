@@ -77,3 +77,8 @@ test('catálogo ignora detalhe indisponível sem aceitar falha ou item ausente',
  assert.throws(()=>parseCatalogPage(search,[{id:'MLB1',status_code:200,body},{id:'MLB2',status_code:500}],'a'));
  assert.throws(()=>parseCatalogPage(search,[{id:'MLB1',status_code:200,body}],'a'));
 });
+test('catálogo aceita o envelope body-only devolvido pela consulta bulk com atributos',()=>{
+ const search={seller_id:456,paging:{total:1,offset:0,limit:20},results:['MLB1']};
+ const body={id:'MLB1',seller_id:456,title:'Produto',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[{id:'SELLER_SKU',value_name:'SKU-1'}],variations:[]};
+ assert.deepEqual(parseCatalogPage(search,[{body}],'a').map(row=>[row.itemId,row.sellerSku]),[['MLB1','SKU-1']]);
+});

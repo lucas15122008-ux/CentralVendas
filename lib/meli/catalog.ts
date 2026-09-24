@@ -34,7 +34,9 @@ const searchSchema=z.object({
  paging:z.object({total:z.number().int().nonnegative(),offset:z.number().int().nonnegative(),limit:z.number().int().positive()}),
  results:z.array(z.string().min(1).max(100)).max(50),
 });
-const bulkEntry=z.object({id:z.string().min(1).max(100),status_code:z.number().int(),body:z.unknown().optional()});
+const verboseBulkEntry=z.object({id:z.string().min(1).max(100),status_code:z.number().int(),body:z.unknown().optional()});
+const bodyOnlyBulkEntry=z.object({body:item}).strict();
+const bulkEntry=z.union([verboseBulkEntry,bodyOnlyBulkEntry]);
 
 function sku(attributes:z.infer<typeof attribute>[],fallback:string|null|undefined){
  return attributes.find(value=>value.id==='SELLER_SKU')?.value_name?.trim()||fallback?.trim()||null;
@@ -42,7 +44,9 @@ function sku(attributes:z.infer<typeof attribute>[],fallback:string|null|undefin
 
 export function parseCatalogPage(searchInput:unknown,itemsInput:unknown,accountId:string):MeliListing[]{
  const search=searchSchema.parse(searchInput);
- const entries=z.array(bulkEntry).max(50).parse(itemsInput);
+ const entries=z.array(bulkEntry).max(50).parse(itemsInput).map(entry=>'status_code' in entry
+  ?entry
+  :{id:entry.body.id,status_code:200,body:entry.body});
  if(new Set(search.results).size!==search.results.length||entries.length!==search.results.length)throw new Error('Catálogo incompleto.');
  const byId=new Map(entries.map(entry=>[entry.id,entry]));
  if(byId.size!==entries.length||search.results.some(id=>!byId.has(id)))throw new Error('Catálogo inconsistente.');
