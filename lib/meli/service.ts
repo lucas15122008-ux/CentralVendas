@@ -5,14 +5,14 @@ import {authorizationUrl,remoteId,orderSchema,normalizeOrders,type MeliOrder,typ
 import {parseSellerDiscounts,type SellerDiscountSummary} from './discounts.ts';
 import {parseCatalogPage} from './catalog.ts';
 export const CALLBACK_URL='https://central-vendas-lucas.kisashi.chatgpt.site/api/meli/callback';
-export class MeliError extends Error {status:number;constructor(status:number,message:string){super(message);this.status=status;}}
+export class MeliError extends Error {status:number;upstreamStatus:number|null;constructor(status:number,message:string,upstreamStatus:number|null=null){super(message);this.status=status;this.upstreamStatus=upstreamStatus;}}
 const configSchema=z.object({clientId:z.string().trim().regex(/^\d{3,30}$/),clientSecret:z.string().trim().min(8).max(500),pkce:z.boolean()});
 const tokenSchema=z.object({access_token:z.string().min(1).max(10000),refresh_token:z.string().min(1).max(10000),expires_in:z.number().int().positive().max(86400*365),user_id:remoteId});
 type App={owner_id:string;client_id:string;secret:string;pkce:number;revision:string};
 type Connection={account_id:string;owner_id:string;seller_id:string|null;nickname:string|null;status:string;generation:string;tokens:string|null;expires_at:number|null;refresh_started:number|null;sync_cursor:string|null;gross_sales_version:number;logistics_version:number;financials_version:number};
 type Flow={account_id:string;generation:string;app_revision:string;verifier:string};
 type Run={id:string;account_id:string;owner_id:string;generation:string;mode:'history'|'incremental';from_date:string;to_date:string;offset:number;total:number|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
-type CatalogRun={id:string;account_id:string;owner_id:string;generation:string;offset:number;total:number|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
+type CatalogRun={id:string;account_id:string;owner_id:string;generation:string;offset:number;total:number|null;scroll_id:string|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
 type Fetcher=(url:string,init?:RequestInit)=>Promise<Response>;
 const shipmentDetailSchema=z.object({id:remoteId,logistic:z.object({type:z.string().min(1).max(80).nullish()}).nullish(),logistic_type:z.string().min(1).max(80).nullish()});
 const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
@@ -63,7 +63,7 @@ export class MeliService {
    let detail:Record<string,unknown>={};
    try{const data=await response.json();if(data&&typeof data==='object'&&!Array.isArray(data))detail=data as Record<string,unknown>;}catch{/* Non-JSON responses are identified by resource and status only. */}
    console.error('meli_upstream_error',{resource:path.split('?')[0].replace(/\/\d+(?=\/|$)/g,'/:id'),status,code:typeof detail.error==='string'&&knownCodes.has(detail.error)?detail.error:'unrecognized_error'});
-   throw new MeliError(status===401?401:status===403?403:status===404?404:status===429?429:502,status===401?'A autorização expirou. Reconecte esta conta.':status===403?'A aplicação não tem acesso a este recurso. Confira as permissões no Mercado Livre.':status===429?'O Mercado Livre pediu uma pausa. Retome a atualização em alguns minutos.':'Não foi possível consultar este recurso no Mercado Livre.');
+   throw new MeliError(status===401?401:status===403?403:status===404?404:status===429?429:502,status===401?'A autorização expirou. Reconecte esta conta.':status===403?'A aplicação não tem acesso a este recurso. Confira as permissões no Mercado Livre.':status===429?'O Mercado Livre pediu uma pausa. Retome a atualização em alguns minutos.':'Não foi possível consultar este recurso no Mercado Livre.',status);
   }
   try{return await response.json() as unknown}catch{throw new MeliError(502,'O Mercado Livre retornou dados incompletos. Tente novamente.');}
  }
@@ -187,24 +187,36 @@ export class MeliService {
   const token=await this.accessToken(owner,id),c=await this.connection(owner,id);
   if(!c.seller_id)throw new MeliError(409,'Autorize o vendedor.');
   const now=this.now(),runId=randomToken(),lease=randomToken();
-  await this.db.prepare("INSERT INTO meli_catalog_runs(account_id,owner_id,generation,id,offset,status,updated_at) VALUES(?,?,?,?,0,'running',?) ON CONFLICT(account_id) DO UPDATE SET owner_id=excluded.owner_id,generation=excluded.generation,id=excluded.id,offset=0,total=NULL,status='running',lease=NULL,lease_until=NULL,error=NULL,updated_at=excluded.updated_at WHERE meli_catalog_runs.status='complete' OR meli_catalog_runs.generation<>excluded.generation")
+  await this.db.prepare("INSERT INTO meli_catalog_runs(account_id,owner_id,generation,id,offset,status,updated_at) VALUES(?,?,?,?,0,'running',?) ON CONFLICT(account_id) DO UPDATE SET owner_id=excluded.owner_id,generation=excluded.generation,id=excluded.id,offset=0,total=NULL,scroll_id=NULL,status='running',lease=NULL,lease_until=NULL,error=NULL,updated_at=excluded.updated_at WHERE meli_catalog_runs.status='complete' OR meli_catalog_runs.generation<>excluded.generation")
    .bind(id,owner,c.generation,runId,now).run();
+  // Runs created before scan pagination have an offset but no cursor. Restart them once;
+  // saved listings remain visible and are replaced atomically as the new scan completes.
+  await this.db.prepare("UPDATE meli_catalog_runs SET id=?,offset=0,total=NULL,scroll_id=NULL,status='running',lease=NULL,lease_until=NULL,error=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND generation=? AND status<>'complete' AND offset>0 AND scroll_id IS NULL")
+   .bind(runId,now,id,owner,c.generation).run();
   const run=await this.db.prepare("UPDATE meli_catalog_runs SET lease=?,lease_until=?,status='running',error=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND generation=? AND (lease_until IS NULL OR lease_until<?) RETURNING *")
    .bind(lease,now+90000,now,id,owner,c.generation,now).first<CatalogRun>();
   if(!run)throw new MeliError(409,'O catálogo já está atualizando em outra aba.');
   const guard="EXISTS(SELECT 1 FROM meli_catalog_runs r JOIN meli_connections c ON c.account_id=r.account_id AND c.owner_id=r.owner_id WHERE r.account_id=? AND r.owner_id=? AND r.id=? AND r.lease=? AND r.generation=c.generation AND c.status='connected' AND r.lease_until>?) AND "+accountGuard.sql;
   const guardValues=()=>[id,owner,run.id,lease,this.now(),...accountGuard.values()];
   try{
-   const query=new URLSearchParams({limit:'20',offset:String(run.offset)});
+   const query=new URLSearchParams({limit:'20',search_type:'scan',...(run.scroll_id?{scroll_id:run.scroll_id}:{})});
    const search=await this.remote('/users/'+c.seller_id+'/items/search?'+query,token);
-   const parsedSearch=z.object({seller_id:remoteId,paging:z.object({total:z.number().int().nonnegative(),offset:z.number().int().nonnegative(),limit:z.number().int().positive()}),results:z.array(z.string()).max(50)}).safeParse(search);
-   if(!parsedSearch.success||parsedSearch.data.seller_id!==c.seller_id||parsedSearch.data.paging.offset!==run.offset)throw new MeliError(502,'O Mercado Livre retornou um catálogo incompleto.');
-   if(!parsedSearch.data.results.length&&run.offset<parsedSearch.data.paging.total)throw new MeliError(502,'A lista de anúncios mudou durante a leitura.');
-   const items=parsedSearch.data.results.length
-    ?await this.remote('/items/bulk?'+new URLSearchParams({ids:parsedSearch.data.results.join(','),attributes:'body.id,body.seller_id,body.title,body.status,body.last_updated,body.seller_custom_field,body.attributes,body.variations'}),token)
+   const parsedSearch=z.object({seller_id:remoteId,paging:z.object({total:z.number().int().nonnegative(),limit:z.number().int().positive()}).passthrough().optional(),scroll_id:z.string().min(1).max(10000).nullable().optional(),results:z.array(z.string().min(1).max(100)).max(20).nullable()}).safeParse(search);
+   if(!parsedSearch.success||parsedSearch.data.seller_id!==c.seller_id)throw new MeliError(502,'O Mercado Livre retornou um catálogo incompleto.');
+   const reportedTotal=parsedSearch.data.paging?.total;
+   if(run.total!==null&&reportedTotal!==undefined&&reportedTotal!==run.total)throw new MeliError(502,'A lista de anúncios mudou durante a leitura.');
+   const total=run.total??reportedTotal;
+   if(total===undefined)throw new MeliError(502,'O Mercado Livre não informou o total de anúncios.');
+   const results=parsedSearch.data.results??[];
+   const ended=parsedSearch.data.results===null;
+   if(!ended&&!results.length&&run.offset<total)throw new MeliError(502,'A lista de anúncios mudou durante a leitura.');
+   const nextScroll=parsedSearch.data.scroll_id??run.scroll_id;
+   if(!ended&&run.offset+results.length<total&&!nextScroll)throw new MeliError(502,'O Mercado Livre não informou a continuação do catálogo.');
+   const items=results.length
+    ?await this.remote('/items/bulk?'+new URLSearchParams({ids:results.join(','),attributes:'body.id,body.seller_id,body.title,body.status,body.last_updated,body.seller_custom_field,body.attributes,body.variations'}),token)
     :[];
    let listings;
-   try{listings=parseCatalogPage(search,items,id);}catch(error){
+   try{listings=parseCatalogPage({seller_id:parsedSearch.data.seller_id,paging:{total,offset:run.offset,limit:Math.max(1,results.length)},results},items,id);}catch(error){
     const first=Array.isArray(items)&&items[0]&&typeof items[0]==='object'&&!Array.isArray(items[0])?items[0] as Record<string,unknown>:null;
     const body=first?.body&&typeof first.body==='object'&&!Array.isArray(first.body)?first.body as Record<string,unknown>:null;
     const safeKeys=(value:Record<string,unknown>|null)=>value?Object.keys(value).filter(key=>/^[a-z_]{1,40}$/i.test(key)).slice(0,20):[];
@@ -218,15 +230,19 @@ export class MeliService {
     SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${guard}
     ON CONFLICT(owner_id,account_id,item_id,variation_id) DO UPDATE SET title=excluded.title,status=excluded.status,seller_sku=excluded.seller_sku,seen_generation=excluded.seen_generation,updated_at=excluded.updated_at`)
     .bind(listing.id,owner,id,listing.itemId,listing.variationId??'',listing.title,listing.status,listing.sellerSku,run.id,listing.updatedAt,...guardValues()));
-   const offset=run.offset+parsedSearch.data.results.length,total=parsedSearch.data.paging.total,status:CatalogRun['status']=offset>=total?'complete':'running';
+   const offset=run.offset+results.length,status:CatalogRun['status']=ended||offset>=total?'complete':'running';
    if(status==='complete')statements.push(this.db.prepare(`UPDATE meli_listings SET status='inactive',updated_at=? WHERE owner_id=? AND account_id=? AND seen_generation<>? AND ${guard}`).bind(this.now(),owner,id,run.id,...guardValues()));
-   statements.push(this.db.prepare(`UPDATE meli_catalog_runs SET offset=?,total=?,status=?,lease=NULL,lease_until=NULL,error=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND ${guard} RETURNING account_id`).bind(offset,total,status,this.now(),id,owner,...guardValues()));
+   statements.push(this.db.prepare(`UPDATE meli_catalog_runs SET offset=?,total=?,scroll_id=?,status=?,lease=NULL,lease_until=NULL,error=NULL,updated_at=? WHERE account_id=? AND owner_id=? AND ${guard} RETURNING account_id`).bind(offset,total,status==='complete'?null:nextScroll,status,this.now(),id,owner,...guardValues()));
    const saved=await this.db.batch(statements);
    if(!saved.at(-1)?.results.length)throw new MeliError(409,'A atualização do catálogo foi cancelada ou substituída.');
    return {status:status as 'running'|'complete',processed:offset,total};
   }catch(error){
    const message=error instanceof MeliError?error.message:'O catálogo contém dados incompletos. A atualização será retomada.';
-   await this.db.prepare("UPDATE meli_catalog_runs SET status='paused',error=?,lease=NULL,lease_until=NULL,updated_at=? WHERE owner_id=? AND account_id=? AND id=? AND lease=?").bind(message,this.now(),owner,id,run.id,lease).run();
+   if(error instanceof MeliError&&error.upstreamStatus===400&&run.scroll_id){
+    await this.db.prepare("UPDATE meli_catalog_runs SET id=?,offset=0,total=NULL,scroll_id=NULL,status='paused',error=?,lease=NULL,lease_until=NULL,updated_at=? WHERE owner_id=? AND account_id=? AND id=? AND lease=?").bind(randomToken(),message,this.now(),owner,id,run.id,lease).run();
+   }else{
+    await this.db.prepare("UPDATE meli_catalog_runs SET status='paused',error=?,lease=NULL,lease_until=NULL,updated_at=? WHERE owner_id=? AND account_id=? AND id=? AND lease=?").bind(message,this.now(),owner,id,run.id,lease).run();
+   }
    throw error instanceof MeliError?error:new MeliError(502,message);
   }
  }

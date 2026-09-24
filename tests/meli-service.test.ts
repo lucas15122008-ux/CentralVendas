@@ -134,8 +134,11 @@ test('catálogo retoma da página salva, preserva antigos na falha e isola gera�
  x.setHandler(async url=>{
   if(url.pathname==='/users/456/items/search'){
    assert.equal(url.searchParams.get('limit'),'20');
-   const offset=Number(url.searchParams.get('offset'));if(offset===2&&failSecond)return new Response(null,{status:503});
-   return Response.json({seller_id:456,paging:{total:3,offset,limit:2},results:offset===0?['MLB1','MLB2']:['MLB3']});
+   assert.equal(url.searchParams.get('search_type'),'scan');assert.equal(url.searchParams.has('offset'),false);
+   const scroll=url.searchParams.get('scroll_id');
+   if(!scroll)return Response.json({seller_id:456,paging:{total:3,limit:2},scroll_id:'cursor-1',results:['MLB1','MLB2']});
+   assert.equal(scroll,'cursor-1');if(failSecond)return new Response(null,{status:503});
+   return Response.json({seller_id:456,paging:{total:3,limit:2},scroll_id:'cursor-1',results:['MLB3']});
   }
   if(url.pathname==='/items/bulk'){
    return Response.json(String(url.searchParams.get('ids')).split(',').map(id=>({id,status_code:200,body:details.get(id)})));
@@ -143,6 +146,7 @@ test('catálogo retoma da página salva, preserva antigos na falha e isola gera�
   throw Error(url.pathname);
  });
  const first=await x.service.syncCatalog('owner','a');assert.equal(first.status,'running');assert.equal(first.processed,2);
+ assert.equal(x.sqlite.prepare("SELECT scroll_id FROM meli_catalog_runs WHERE account_id='a'").get()?.scroll_id,'cursor-1');
  assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_listings WHERE account_id=\'a\'').get()?.n,3);
  await assert.rejects(x.service.syncCatalog('owner','a'));assert.equal(x.sqlite.prepare("SELECT offset FROM meli_catalog_runs WHERE account_id='a'").get()?.offset,2);
  assert.equal(x.sqlite.prepare("SELECT status FROM meli_listings WHERE id='old'").get()?.status,'active');
@@ -159,6 +163,35 @@ test('sincronização concluída libera nova tentativa do catálogo em espera',a
  await x.service.sync('owner','a');
  const job=x.sqlite.prepare("SELECT attempts,due_at,error FROM meli_jobs WHERE resource='catalog'").get();
  assert.equal(job?.attempts,0);assert.equal(job?.error,null);assert.ok(Number(job?.due_at)<9999999999999);
+});
+test('catálogo reinicia progresso antigo sem cursor no modo scan',async()=>{
+ const x=setup();await x.authorize();
+ const generation=String(x.sqlite.prepare("SELECT generation FROM meli_connections WHERE account_id='a'").get()?.generation);
+ x.sqlite.prepare("INSERT INTO meli_catalog_runs(account_id,owner_id,generation,id,offset,total,status,updated_at) VALUES('a','owner',?,'old-run',1080,1130,'paused',1)").run(generation);
+ x.setHandler(async url=>{
+  if(url.pathname==='/users/456/items/search'){
+   assert.equal(url.searchParams.get('search_type'),'scan');assert.equal(url.searchParams.has('offset'),false);assert.equal(url.searchParams.has('scroll_id'),false);
+   return Response.json({seller_id:456,paging:{total:1,limit:20},scroll_id:'cursor-1',results:['MLB1']});
+  }
+  if(url.pathname==='/items/bulk')return Response.json([{body:{id:'MLB1',seller_id:456,title:'Produto',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]}}]);
+  throw Error(url.pathname);
+ });
+ const result=await x.service.syncCatalog('owner','a');assert.deepEqual(result,{status:'complete',processed:1,total:1});
+ const run=x.sqlite.prepare("SELECT status,offset,scroll_id FROM meli_catalog_runs WHERE account_id='a'").get();
+ assert.deepEqual({...run},{status:'complete',offset:1,scroll_id:null});
+});
+test('catálogo reinicia scan quando o cursor expira',async()=>{
+ const x=setup();await x.authorize();
+ x.setHandler(async url=>{
+  if(url.pathname==='/users/456/items/search')return Response.json({seller_id:456,paging:{total:2,limit:20},scroll_id:'cursor-1',results:['MLB1']});
+  if(url.pathname==='/items/bulk')return Response.json([{body:{id:'MLB1',seller_id:456,title:'Produto',status:'active',last_updated:'2026-09-20T12:00:00Z',attributes:[],variations:[]}}]);
+  throw Error(url.pathname);
+ });
+ await x.service.syncCatalog('owner','a');
+ x.setHandler(async url=>{assert.equal(url.searchParams.get('scroll_id'),'cursor-1');return Response.json({error:'bad_request'},{status:400})});
+ await assert.rejects(x.service.syncCatalog('owner','a'));
+ const run=x.sqlite.prepare("SELECT status,offset,total,scroll_id FROM meli_catalog_runs WHERE account_id='a'").get();
+ assert.deepEqual({...run},{status:'paused',offset:0,total:null,scroll_id:null});
 });
 test('falha incremental conserva cursor, período e offset até concluir',async()=>{
  const x=setup();await x.authorize();

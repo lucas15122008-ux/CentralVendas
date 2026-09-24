@@ -62,6 +62,8 @@ test('migração cria fichas, correções, catálogo e rollout auditáveis',()=>
 
  const listingIndexes=sqlite.prepare("PRAGMA index_list('meli_listings')").all().map(row=>row.name);
  assert.ok(listingIndexes.includes('idx_meli_listings_target'));
+ const catalogColumns=sqlite.prepare("PRAGMA table_info('meli_catalog_runs')").all();
+ assert.ok(catalogColumns.some(column=>column.name==='scroll_id'));
  const profileColumns=sqlite.prepare("PRAGMA table_info('ad_profile_events')").all();
  const variation=profileColumns.find(column=>column.name==='variation_id');
  assert.deepEqual(variation&&{notnull:variation.notnull,dflt_value:variation.dflt_value},{notnull:1,dflt_value:"''"});
