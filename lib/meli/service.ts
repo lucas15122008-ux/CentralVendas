@@ -205,10 +205,13 @@ export class MeliService {
     :[];
    let listings;
    try{listings=parseCatalogPage(search,items,id);}catch(error){
+    const first=Array.isArray(items)&&items[0]&&typeof items[0]==='object'&&!Array.isArray(items[0])?items[0] as Record<string,unknown>:null;
+    const body=first?.body&&typeof first.body==='object'&&!Array.isArray(first.body)?first.body as Record<string,unknown>:null;
+    const safeKeys=(value:Record<string,unknown>|null)=>value?Object.keys(value).filter(key=>/^[a-z_]{1,40}$/i.test(key)).slice(0,20):[];
     const reason=error instanceof z.ZodError
      ?error.issues.slice(0,5).map(issue=>({path:issue.path.join('.'),code:issue.code}))
      :error instanceof Error?error.message:'unknown';
-    console.error('meli_catalog_parse_error',{reason});
+    console.error('meli_catalog_parse_error',{reason,entryKeys:safeKeys(first),bodyKeys:safeKeys(body)});
     throw new MeliError(502,'O Mercado Livre retornou anúncios incompletos.');
    }
    const statements=listings.map(listing=>this.db.prepare(`INSERT INTO meli_listings(id,owner_id,account_id,item_id,variation_id,title,status,seller_sku,seen_generation,updated_at)
