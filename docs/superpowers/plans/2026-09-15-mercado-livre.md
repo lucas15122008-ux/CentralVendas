@@ -50,5 +50,5 @@ Arquivos: components/meli-accounts.tsx, components/commerce-app.tsx, components/
 ## 4. Entrega
 
 - [x] Todos os testes, TypeScript, build e revisão de segurança/consistência.
-- [ ] Gerar MELI_ENCRYPTION_KEY somente se ausente, guardar como segredo Sites e publicar como privado.
-- [ ] Entregar o mesmo endereço e os passos exatos para o usuário informar credenciais e autorizar sua aplicação. Não declarar conta conectada antes da autorização real.
+- [x] Gerar MELI_ENCRYPTION_KEY somente se ausente, guardar como segredo Sites e publicar como privado.
+- [x] Entregar o mesmo endereço e os passos exatos para o usuário informar credenciais e autorizar sua aplicação. Não declarar conta conectada antes da autorização real.
