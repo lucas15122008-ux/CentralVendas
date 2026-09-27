@@ -12,6 +12,7 @@ export function MeliAccounts({accounts,onAdd,onReload}:{accounts:Account[];onAdd
  const [clientId,setClientId]=useState(''),[secret,setSecret]=useState(''),[pkce,setPkce]=useState(true),[saving,setSaving]=useState(false),[formError,setFormError]=useState('');
  const mounted=useRef(true),stop=useRef(false),loadingRequest=useRef(false);
  const load=useCallback(async()=>{if(loadingRequest.current)return;loadingRequest.current=true;try{const s=await api<Status>('status');if(mounted.current){setStatus(s);setError('');}}catch(e){if(mounted.current)setError(e instanceof Error?e.message:'Não foi possível carregar as conexões.')}finally{loadingRequest.current=false}},[]);
+ // eslint-disable-next-line react-hooks/set-state-in-effect -- load only sets state after its request resolves
  useEffect(()=>{mounted.current=true;void load();return()=>{mounted.current=false;stop.current=true}},[load]);
  useEffect(()=>visiblePoll(load),[load]);
  function openSettings(){if(!status)return;setClientId(status.app.clientId);setPkce(status.app.configured?status.app.pkce:true);setSecret('');setFormError('');setSettings(true)}

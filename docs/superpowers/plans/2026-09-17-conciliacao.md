@@ -10,9 +10,9 @@ Desenho aprovado na conversa; execução solicitada em 17/09. SKU 64265: mesmo c
 
 ## Entregas
 
-- [ ] Domínio: testes de vínculo com vigência e isolamento; custo igual em vendas de preços diferentes; despesa Full deduzida uma vez; ajuste parcial; invalidação por mudança e preservação dos originais. Implementar tipos e projeção em `lib/reconciliation.ts`, integrar `lib/finance.ts`.
-- [ ] Persistência: tabela append-only `reconciliation_events` e migração gerada, serviço `lib/reconciliation-store.ts` e rota `/api/reconciliation`. Testar propriedade, conflito de revisão, reenvio idempotente, retirada auditável e escrita concorrente com atualização da venda. A escrita usa INSERT SELECT condicionado ao documento original e à revisão esperada.
-- [ ] Interface: `components/reconciliation-view.tsx`, navegação Conciliação, busca/estado/conta/período, editor de totais por item, classificação Full manual e histórico. Vincular anúncio/variação a SKU com vigência e confirmação. Campos vazios permanecem desconhecidos. Mostrar origem e motivo do ajuste.
+- [x] Domínio: testes de vínculo com vigência e isolamento; custo igual em vendas de preços diferentes; despesa Full deduzida uma vez; ajuste parcial; invalidação por mudança e preservação dos originais. Implementar tipos e projeção em `lib/reconciliation.ts`, integrar `lib/finance.ts`.
+- [x] Persistência: tabela append-only `reconciliation_events` e migração gerada, serviço `lib/reconciliation-store.ts` e rota `/api/reconciliation`. Testar propriedade, conflito de revisão, reenvio idempotente, retirada auditável e escrita concorrente com atualização da venda. A escrita usa INSERT SELECT condicionado ao documento original e à revisão esperada.
+- [x] Interface: `components/reconciliation-view.tsx`, navegação Conciliação, busca/estado/conta/período, editor de totais por item, classificação Full manual e histórico. Vincular anúncio/variação a SKU com vigência e confirmação. Campos vazios permanecem desconhecidos. Mostrar origem e motivo do ajuste.
 - [ ] Verificação: executar testes de domínio/serviço e API local, TypeScript, build e revisão visual desktop/mobile. Publicar no mesmo Site privado e conferir sucesso da migração/publicação.
 
 ## Contratos
