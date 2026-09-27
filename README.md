@@ -61,3 +61,7 @@ Esses testes criam contas e lotes sintéticos exclusivamente no banco local. Nun
 ## Estrutura
 
 `lib/` contém cálculo, projeção, datas, migração e integrações. `app/api/` contém acesso privado a D1/R2. `components/` contém a interface. `drizzle/` contém somente migrações de esquema para produção. `tests/` contém fixtures e testes; `docs/` registra o escopo e as decisões.
+
+
+
+By: Lucas Leite
