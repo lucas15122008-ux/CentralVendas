@@ -20,7 +20,7 @@ Arquivos: `lib/meli/service.ts`, `db/schema.ts`, nova migração aditiva em `dri
 
 Interface: `sync(owner, accountId, mode = 'auto')` mantém o contrato de progresso; `auto` usa histórico quando não há marcador e busca por `order.date_last_updated` depois da primeira carga. Retorno inclui `mode: 'history' | 'incremental'`. Cursor só avança após salvar todos os pedidos da janela; execução parcial conserva período/offset. Consultas retomadas usam o modo salvo, não um novo período.
 
-- [ ] Escrever teste que conclui histórico, avança relógio e exige consulta incremental com sobreposição, sem `order.date_created.from`.
+- [x] Escrever teste que conclui histórico, avança relógio e exige consulta incremental com sobreposição, sem `order.date_created.from`.
 
 ```ts
 assert.equal(query.has('order.date_created.from'), false);
@@ -28,10 +28,10 @@ assert.equal(query.get('order.date_last_updated.from'), '2026-09-15T15:00:00.000
 assert.equal(result.mode, 'incremental');
 ```
 
-- [ ] Executar o teste e registrar a falha antes da alteração.
-- [ ] Adicionar modo à execução e cursor à conexão; inicializar cursor de conexões existentes somente a partir de execução concluída da mesma geração.
-- [ ] Implementar resolução de janela UTC e preservar cursores em falhas/concorrência.
-- [ ] Testar interrupção, retomada, desconexão e não regressão do histórico; executar suíte e commit.
+- [x] Executar o teste e registrar a falha antes da alteração.
+- [x] Adicionar modo à execução e cursor à conexão; inicializar cursor de conexões existentes somente a partir de execução concluída da mesma geração.
+- [x] Implementar resolução de janela UTC e preservar cursores em falhas/concorrência.
+- [x] Testar interrupção, retomada, desconexão e não regressão do histórico; executar suíte e commit.
 
 ## Tarefa 2 — processamento de um recurso e fila persistente
 
@@ -39,7 +39,7 @@ Arquivos: `lib/meli/service.ts`, `lib/meli/jobs.ts`, `db/schema.ts`, migração 
 
 Interfaces: `enqueueNotification({applicationId,sellerId,topic,resource})`; `processNext(): Promise<{pending:boolean}>`; processamento sempre resolve proprietário/conta no banco, nunca por identidade recebida do cliente. O recurso permitido é `/orders/<id>` ou `/shipments/<id>`. A chave do trabalho incorpora conta e geração. Aquisição de trava por conta é compartilhada por sincronização manual e trabalhos automáticos.
 
-- [ ] Testar evento duplicado produzindo um trabalho, recurso inválido sendo recusado e geração antiga não gravando dados.
+- [x] Testar evento duplicado produzindo um trabalho, recurso inválido sendo recusado e geração antiga não gravando dados.
 
 ```ts
 await enqueueNotification(event); await enqueueNotification(event);
@@ -47,11 +47,11 @@ assert.equal(await pendingCount(), 1);
 await assert.rejects(enqueueNotification({...event, resource:'https://example.test/'}));
 ```
 
-- [ ] Executar testes em falha.
-- [ ] Extrair enriquecimento existente sem alterar regras de dinheiro e criar rotina para pedido/envio individual.
-- [ ] Persistir venda pendente antes do enriquecimento; preservar verificação de vendedor, rateio integral e atomicidade de membros do envio.
-- [ ] Persistir tentativas, vencimento de trava e próxima tentativa; 401 exige reconectar, 429/5xx preservam trabalho para retomar.
-- [ ] Testar falha após gravação inicial, cancelamento fora de ordem, recuperação e trava entre evento/histórico; commit validado.
+- [x] Executar testes em falha.
+- [x] Extrair enriquecimento existente sem alterar regras de dinheiro e criar rotina para pedido/envio individual.
+- [x] Persistir venda pendente antes do enriquecimento; preservar verificação de vendedor, rateio integral e atomicidade de membros do envio.
+- [x] Persistir tentativas, vencimento de trava e próxima tentativa; 401 exige reconectar, 429/5xx preservam trabalho para retomar.
+- [x] Testar falha após gravação inicial, cancelamento fora de ordem, recuperação e trava entre evento/histórico; commit validado.
 
 ## Tarefa 3 — ponte autenticada e Worker complementar
 
@@ -59,7 +59,7 @@ Arquivos: `lib/meli/automation-auth.ts`, `app/api/meli/internal/route.ts`, `work
 
 Assinatura canônica: `POST\n/api/meli/internal\n<timestamp>\n<nonce>\n<sha256(body)>`, HMAC SHA-256. Limite de relógio de 180 segundos. Nonce de uso único, registrado antes do processamento. Segredos vazios desativam a rota. Ações permitidas: receber aviso, executar lote, recuperar alterações e ler saúde do serviço; nenhuma ação financeira de escrita no Mercado Livre.
 
-- [ ] Escrever testes de assinatura alterada, replay, expiração, ausência de segredo e rejeição de tamanho excedido.
+- [x] Escrever testes de assinatura alterada, replay, expiração, ausência de segredo e rejeição de tamanho excedido.
 
 ```ts
 assert.equal(await verify(changedBody), false);
@@ -67,11 +67,11 @@ assert.equal(await acceptOnce(signedRequest), true);
 assert.equal(await acceptOnce(signedRequest), false);
 ```
 
-- [ ] Implementar assinatura/verificação e teste red-green no runtime real.
-- [ ] Worker recebe somente POST com JSON limitado e tópico permitido; confirma depois de `QUEUE.send`, não antes.
-- [ ] Consumer chama rota fixa do Site sem redirecionamento, com assinatura nova por tentativa. Erro recuperável retorna trabalho à fila; falhas persistentes seguem para fila de falhas. Agendamento de um minuto aciona recuperação mesmo sem navegador.
-- [ ] Configurar somente nomes lógicos no código; secrets e IDs reais ficam na configuração de implantação, sem valores privados no repositório.
-- [ ] Validar Worker com saída HTTP interceptada e falhas de fila; commit.
+- [x] Implementar assinatura/verificação e teste red-green no runtime real.
+- [x] Worker recebe somente POST com JSON limitado e tópico permitido; confirma depois de `QUEUE.send`, não antes.
+- [x] Consumer chama rota fixa do Site sem redirecionamento, com assinatura nova por tentativa. Erro recuperável retorna trabalho à fila; falhas persistentes seguem para fila de falhas. Agendamento de um minuto aciona recuperação mesmo sem navegador.
+- [x] Configurar somente nomes lógicos no código; secrets e IDs reais ficam na configuração de implantação, sem valores privados no repositório.
+- [x] Validar Worker com saída HTTP interceptada e falhas de fila; commit.
 
 ## Tarefa 4 — estado automático e atualização do painel
 
@@ -79,20 +79,20 @@ Arquivos: `components/commerce-app.tsx`, `components/meli-accounts.tsx`, `app/ap
 
 Interface: status de automação inclui configurada, último contato, último evento, trabalhos pendentes e erro seguro. Interface atualiza workspace a cada 15 segundos apenas em modo real e documento visível, sem sobreposição; limpeza cancela futuros disparos ao desmontar. Atualizar vendas manualmente usa consulta incremental depois do histórico.
 
-- [ ] Verificar as transições de estado e ciclo de consultas com relógio controlado.
-- [ ] Mostrar configuração pendente enquanto Worker/credenciais não estão ativos; atrasado quando não há contato há mais de três minutos; reconexão somente na conta afetada.
-- [ ] Mostrar margem pendente quando faltam dados e manter história de custos intacta.
+- [x] Verificar as transições de estado e ciclo de consultas com relógio controlado.
+- [x] Mostrar configuração pendente enquanto Worker/credenciais não estão ativos; atrasado quando não há contato há mais de três minutos; reconexão somente na conta afetada.
+- [x] Mostrar margem pendente quando faltam dados e manter história de custos intacta.
 - [ ] Validar TypeScript, build e comportamento em navegador autorizado.
 
 ## Tarefa 5 — ativação e entrega
 
-- [ ] Confirmar conta Cloudflare criada pelo usuário e autenticação segura para implantação.
-- [ ] Executar testes, revisão independente somente leitura e build.
-- [ ] Publicar alterações do Site existente com migração aditiva e sem alterar audiência.
-- [ ] Implantar Worker complementar, fila, fila de falhas, cron e secrets na conta do usuário.
+- [x] Confirmar conta Cloudflare criada pelo usuário e autenticação segura para implantação.
+- [x] Executar testes, revisão independente somente leitura e build.
+- [x] Publicar alterações do Site existente com migração aditiva e sem alterar audiência.
+- [x] Implantar Worker complementar, fila, fila de falhas, cron e secrets na conta do usuário.
 - [ ] Cadastrar URL de notificações e tópicos autorizados da aplicação Mercado Livre.
 - [ ] Demonstrar evento recebido, processamento com aba fechada, retomada de falha e atualização visível no painel.
-- [ ] Atualizar guia e estado de implantação. Se a infraestrutura não estiver disponível, registrar precisamente o que foi preparado e o que ainda impede a ativação.
+- [x] Atualizar guia e estado de implantação. Se a infraestrutura não estiver disponível, registrar precisamente o que foi preparado e o que ainda impede a ativação.
 
 ## Estado verificado em 16/09/2026
 

@@ -77,7 +77,7 @@ export type FinancialSource='meli'|'ad_profile'|'full_estimate'|'full_closure'|'
 export function applyAdProfiles(sales:Sale[],profiles:AdProfileEvent[]):Sale[];
 ```
 
-- [ ] **Step 1: Escrever testes falhando para seleção e cálculo da ficha**
+- [x] **Step 1: Escrever testes falhando para seleção e cálculo da ficha**
 
 Criar casos com duas contas, dois anúncios e duas variações do SKU 64265. Fixar estes resultados:
 
@@ -90,13 +90,13 @@ assert.equal(calculateSale(applyAdProfiles([sale],profiles)[0],[]).costCents,200
 
 Cobrir custo `100.0050` para duas unidades, imposto incluído, imposto unitário, percentual, zero declarado, campo ausente, vigência futura, revisão `clear`, conta diferente e variação diferente.
 
-- [ ] **Step 2: Executar os testes e confirmar a falha esperada**
+- [x] **Step 2: Executar os testes e confirmar a falha esperada**
 
 Run: `node --test tests/ad-profiles.test.ts tests/finance.test.ts`
 
 Expected: FAIL por ausência de `lib/ad-profiles.ts` e de suporte a `sale.adProfile`.
 
-- [ ] **Step 3: Implementar seleção imutável e cálculo exato da ficha**
+- [x] **Step 3: Implementar seleção imutável e cálculo exato da ficha**
 
 Adicionar a `Sale`:
 
@@ -107,7 +107,7 @@ fieldSources?:Partial<Record<'revenueCents'|'feeCents'|'shippingCents'|'otherCen
 
 Em `calculateSale`, usar `sale.adProfile` como fonte primária. Calcular custo com `Math.round(unitCostTenThousandths*costQuantity/100)`, imposto unitário com a mesma escala e imposto percentual com `Math.round(revenueCents*rateBasisPoints/10_000)`. Manter o caminho de `CostRecord` somente para a comparação de migração da Task 4.
 
-- [ ] **Step 4: Escrever testes falhando para correções pontuais**
+- [x] **Step 4: Escrever testes falhando para correções pontuais**
 
 ```ts
 assert.equal(applySaleCorrections({...sale,shippingCents:null},[fallback]).shippingCents,1250);
@@ -118,17 +118,17 @@ assert.equal(applySaleCorrections({...sale,feeCents:1400},[override]).correction
 
 Também testar campo errado, conta errada, maior revisão fora de ordem e evento `clear`.
 
-- [ ] **Step 5: Implementar correções e mapa de origens**
+- [x] **Step 5: Implementar correções e mapa de origens**
 
 `fallback` só substitui `null`. `override` exige `sourceValue` igual ao valor oficial atual; divergência marca `correctionState:'stale'`. Eventos `clear` removem somente o campo correspondente. `applyAdProfiles` anexa a ficha e resolve a operação, convertendo `operation:'auto'` em canal desconhecido para que a logística oficial tenha precedência.
 
-- [ ] **Step 6: Executar a suíte de domínio**
+- [x] **Step 6: Executar a suíte de domínio**
 
 Run: `node --test tests/ad-profiles.test.ts tests/sale-corrections.test.ts tests/finance.test.ts tests/reconciliation-engine.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commitar o domínio puro**
+- [x] **Step 7: Commitar o domínio puro**
 
 ```bash
 git add lib/ad-profiles.ts lib/sale-corrections.ts lib/sale-projection.ts lib/finance.ts tests/ad-profiles.test.ts tests/sale-corrections.test.ts tests/finance.test.ts
@@ -164,7 +164,7 @@ export async function saveSaleCorrection(db:D1Database,ownerId:string,command:Sa
 
 `POST /api/ad-profiles` recebe `action`, `requestId`, conta, item, variação, vigência, `expectedRevision`, payload e motivo. `POST /api/sale-corrections` recebe uma única venda, `field`, `mode`, valor, fonte atual, assinatura, revisão e motivo.
 
-- [ ] **Step 1: Adicionar testes de migração antes do schema**
+- [x] **Step 1: Adicionar testes de migração antes do schema**
 
 Exigir `ad_profile_events`, `sale_correction_events`, `meli_listings`, `meli_catalog_runs`, `ad_profile_rollouts`, os índices únicos e `meli_connections.financials_version NOT NULL DEFAULT 1`.
 
@@ -178,13 +178,13 @@ assert.ok(profileIndexes.includes('idx_ad_profiles_target_revision'));
 assert.ok(correctionIndexes.includes('idx_sale_corrections_target_revision'));
 ```
 
-- [ ] **Step 2: Executar teste e verificar falha**
+- [x] **Step 2: Executar teste e verificar falha**
 
 Run: `node --test tests/migrations.test.ts`
 
 Expected: FAIL porque as tabelas não existem.
 
-- [ ] **Step 3: Definir schema e gerar a migração**
+- [x] **Step 3: Definir schema e gerar a migração**
 
 `ad_profile_events` guarda item, variação nula normalizada para `''` depois de a API rejeitar string vazia, vigência, revisão, ação, payload JSON canônico, origem e auditoria. `sale_correction_events` guarda venda, campo, revisão, modo, valor, fonte, assinatura e auditoria. `meli_listings` guarda conta/item/variação, título, status, SKU do vendedor e atualização; `meli_catalog_runs` guarda geração, offset, total, status e lease; `ad_profile_rollouts` guarda estado, assinatura, relatório e ativação por proprietário. Adicionar `financials_version` à conexão para uma releitura histórica única. Todas as FKs e consultas incluem proprietário/conta.
 
@@ -192,15 +192,15 @@ Run: `npx drizzle-kit generate --name ad_profiles`
 
 Expected: somente `0008_ad_profiles.sql`, snapshot e journal mudam.
 
-- [ ] **Step 4: Escrever casos de API falhando**
+- [x] **Step 4: Escrever casos de API falhando**
 
 Em `tests/api.local.mjs`, testar login, mesma origem, outro dono, variação nula, custo zero, payload inválido, idempotência, revisão concorrente, cópia na mesma conta e recusa entre contas. Para correções, validar venda pelo proprietário, campo, fonte atual, fallback somente para `null`, motivo obrigatório e inteiros não negativos.
 
-- [ ] **Step 5: Implementar stores e rotas**
+- [x] **Step 5: Implementar stores e rotas**
 
 Validar com Zod e usar `INSERT ... SELECT ... WHERE expectedRevision=(SELECT COALESCE(MAX(revision),0)...)`. Reenvio relê pelo `request_id`. O servidor consulta anúncio, venda e conta; nunca confia apenas nos identificadores do cliente.
 
-- [ ] **Step 6: Executar persistência e API**
+- [x] **Step 6: Executar persistência e API**
 
 Run: `node --test tests/migrations.test.ts tests/ad-profiles.test.ts tests/sale-corrections.test.ts`
 
@@ -208,7 +208,7 @@ Run: `npm run test:api:local`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commitar persistência**
+- [x] **Step 7: Commitar persistência**
 
 ```bash
 git add db/schema.ts drizzle lib/ad-profile-store.ts lib/sale-correction-store.ts app/api/ad-profiles/route.ts app/api/sale-corrections/route.ts tests/migrations.test.ts tests/api.local.mjs
@@ -241,11 +241,11 @@ export function parseCatalogPage(search:unknown,items:unknown,accountId:string):
 MeliService.syncCatalog(ownerId:string,accountId:string,expectedGeneration?:string):Promise<{status:'running'|'complete';processed:number;total:number}>;
 ```
 
-- [ ] **Step 1: Escrever testes falhando para dados financeiros oficiais e catálogo**
+- [x] **Step 1: Escrever testes falhando para dados financeiros oficiais e catálogo**
 
 Para descontos, validar a resposta de `/orders/:id/discounts`, separar a parcela paga pelo vendedor, manter subsídio do Mercado Livre fora das despesas e produzir `otherCents` conhecido quando todos os detalhes forem conclusivos. Resposta ausente ou ambígua continua `null`; nunca usar zero. Cobrir também anúncio sem variação, duas variações, SKU ausente, status pausado, resposta malformada, item de outro vendedor e chave por conta/variação.
 
-- [ ] **Step 2: Escrever testes falhando para retomada**
+- [x] **Step 2: Escrever testes falhando para retomada**
 
 Simular duas páginas e falha após a primeira. Confirmar idempotência, offset salvo, proteção de geração e isolamento.
 
@@ -254,25 +254,25 @@ assert.equal(sqlite.prepare('SELECT count(*) n FROM meli_listings').get()?.n,3);
 assert.equal(sqlite.prepare("SELECT offset FROM meli_catalog_runs WHERE account_id='a'").get()?.offset,2);
 ```
 
-- [ ] **Step 3: Implementar enriquecimento financeiro e releitura única**
+- [x] **Step 3: Implementar enriquecimento financeiro e releitura única**
 
 Criar parser estrito em `lib/meli/discounts.ts`. `normalizeOrders` recebe o custo promocional do vendedor em centavos e mantém receita dos itens separada. Quando `financials_version<2`, o sincronizador muda atomicamente para `2`, limpa o cursor e agenda uma releitura histórica uma única vez, seguindo o padrão já testado de `grossSalesVersion` e `logisticsVersion`.
 
-- [ ] **Step 4: Implementar parser e sincronização protegida**
+- [x] **Step 4: Implementar parser e sincronização protegida**
 
 Buscar IDs do vendedor em páginas e detalhes em lotes, validar com Zod e gravar página+offset atomicamente. Marcar anúncios antigos como inativos somente depois de uma varredura completa; falha parcial nunca remove catálogo.
 
-- [ ] **Step 5: Integrar com a fila automática**
+- [x] **Step 5: Integrar com a fila automática**
 
 Ao concluir uma janela de pedidos, enfileirar `catalog` para conta e geração. `MeliJobs.process` chama `syncCatalog`; a recuperação periódica converge sem duplicar trabalhos.
 
-- [ ] **Step 6: Executar testes do Mercado Livre**
+- [x] **Step 6: Executar testes do Mercado Livre**
 
 Run: `node --test tests/meli.test.ts tests/meli-service.test.ts tests/meli-jobs.test.ts tests/meli-events.test.ts tests/meli-internal.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commitar catálogo**
+- [x] **Step 7: Commitar catálogo**
 
 ```bash
 git add lib/meli/catalog.ts lib/meli/discounts.ts lib/meli/protocol.ts lib/meli/service.ts lib/meli/jobs.ts lib/meli/internal.ts tests/helpers/meli.ts tests/meli.test.ts tests/meli-service.test.ts tests/meli-jobs.test.ts
@@ -300,29 +300,29 @@ export function buildAdProfileMigration(input:LegacyWorkspace):MigrationPlan;
 export async function activateAdProfileMigration(db:D1Database,ownerId:string,expectedSourceStamp:string):Promise<MigrationPlan>;
 ```
 
-- [ ] **Step 1: Escrever matriz de migração falhando**
+- [x] **Step 1: Escrever matriz de migração falhando**
 
 Cobrir vínculo+custo, duas vigências, SKU exato único, SKU ambíguo, import retirado, desempate de mesma vigência, imposto desconhecido, SKU 64265 Full/comum, ajuste legado preservado na camada histórica, fechamento Full preservado e diferença bloqueadora.
 
-- [ ] **Step 2: Executar teste e confirmar falha**
+- [x] **Step 2: Executar teste e confirmar falha**
 
 Run: `node --test tests/ad-profile-migration.test.ts`
 
 Expected: FAIL por módulo ausente.
 
-- [ ] **Step 3: Implementar planejador determinístico**
+- [x] **Step 3: Implementar planejador determinístico**
 
 Converter decimais para dez-milésimos, criar `origin:'legacy'`, nunca casar por título/preço e assinar todas as fontes. Projetar cada venda pelos motores antigo e novo, comparando custo, imposto, operação, contribuição e estado.
 
-- [ ] **Step 4: Persistir rollout na estrutura criada pela Task 2**
+- [x] **Step 4: Persistir rollout na estrutura criada pela Task 2**
 
 Usar `ad_profile_rollouts(owner_id PRIMARY KEY,state,source_stamp,report,activated_at,updated_at)` com estados `pending`, `blocked`, `active`. A ativação grava fichas e rollout em uma transação; os ajustes completos de vendas já existentes continuam nos eventos legados e só afetam aquelas vendas históricas. Diferença bloqueadora grava relatório e não ativa. Proprietário sem legado ativa um rollout vazio e passa diretamente ao fluxo novo.
 
-- [ ] **Step 5: Implementar API de prévia e ativação**
+- [x] **Step 5: Implementar API de prévia e ativação**
 
 `GET /api/ad-profile-migration` retorna contagens e issues do usuário. `POST` recebe `{requestId,expectedSourceStamp}`, recalcula no servidor, é idempotente e responde 409 quando a fonte mudou.
 
-- [ ] **Step 6: Executar migração e API**
+- [x] **Step 6: Executar migração e API**
 
 Run: `node --test tests/ad-profile-migration.test.ts`
 
@@ -330,7 +330,7 @@ Run: `npm run test:api:local`
 
 Expected: PASS, incluindo rollback e isolamento.
 
-- [ ] **Step 7: Commitar migração**
+- [x] **Step 7: Commitar migração**
 
 ```bash
 git add lib/ad-profile-migration.ts app/api/ad-profile-migration/route.ts tests/ad-profile-migration.test.ts tests/api.local.mjs
@@ -367,15 +367,15 @@ export function collectPending(input:{sales:SaleResult[];listings:MeliListing[];
 
 `Workspace` passa a devolver `listings`, `adProfiles`, `saleCorrections`, `pending` e `rollout`.
 
-- [ ] **Step 1: Escrever testes falhando por tipo de pendência**
+- [x] **Step 1: Escrever testes falhando por tipo de pendência**
 
 Criar caso para cada `PendingKind`, zero declarado, anúncio sem venda, venda sem `itemId`, primeiro mês Full, correção stale e conflito de migração. IDs devem permanecer iguais após refresh.
 
-- [ ] **Step 2: Escrever teste integrado de projeção**
+- [x] **Step 2: Escrever teste integrado de projeção**
 
 Montar venda com ficha, API completa e fechamento Full. Confirmar a mesma contribuição em resumo, venda e anúncio. Remover cada fonte e verificar margem `null` com motivo preciso.
 
-- [ ] **Step 3: Implementar pipeline único**
+- [x] **Step 3: Implementar pipeline único**
 
 ```ts
 const legacy=applyReconciliation(rawSales,legacyCosts,legacyEvents);
@@ -387,15 +387,15 @@ const results=withFull.map(sale=>calculateSale(sale,[]));
 
 Quando `rollout.state==='active'`, fichas substituem custos/vínculos legados nas vendas automáticas; `legacyCosts` e eventos `targetType:'sale'` continuam disponíveis somente para reproduzir ajustes completos criados antes do corte. Em `pending/blocked`, manter integralmente a projeção antiga. A assinatura Full inclui ficha e correções materiais.
 
-- [ ] **Step 4: Atualizar workspace e fechamento Full**
+- [x] **Step 4: Atualizar workspace e fechamento Full**
 
 Carregar fontes por proprietário e retornar resumos mínimos. A API Full usa a projeção ativa e preserva prevenção de dupla dedução.
 
-- [ ] **Step 5: Atualizar demonstração**
+- [x] **Step 5: Atualizar demonstração**
 
 Gerar catálogo e fichas demo completas, uma pendência e um anúncio Full. A demonstração não depende de planilha nem de conciliação.
 
-- [ ] **Step 6: Executar domínio e API**
+- [x] **Step 6: Executar domínio e API**
 
 Run: `node --test tests/pending.test.ts tests/ad-profiles.test.ts tests/sale-corrections.test.ts tests/finance.test.ts tests/full-reconciliation.test.ts tests/reconciliation.test.ts`
 
@@ -403,7 +403,7 @@ Run: `npm run test:api:local`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commitar projeção**
+- [x] **Step 7: Commitar projeção**
 
 ```bash
 git add lib/pending.ts lib/sale-projection.ts lib/finance.ts lib/full-reconciliation.ts lib/full-closure-store.ts app/api/workspace/route.ts app/api/full-closures/route.ts lib/demo.ts tests
@@ -427,15 +427,15 @@ git commit -m "feat: project sales from ads and automatic sources"
 - Consumes: catálogo, fichas, vendas, contas, `POST /api/ad-profiles` e `onReload` coordenado.
 - Produces: `AdProfilesView` e `AdProfileDialog` com edição, cópia, prévia e histórico.
 
-- [ ] **Step 1: Trocar navegação em demonstração**
+- [x] **Step 1: Trocar navegação em demonstração**
 
 Substituir `products` por `ads` e hash `#ads`. `#products` redireciona para `#ads` durante a transição. Manter a view antiga sem uso até a Task 8.
 
-- [ ] **Step 2: Implementar lista de anúncios**
+- [x] **Step 2: Implementar lista de anúncios**
 
 Agrupar variações; mostrar conta, operação, custo, imposto, vigência, atualização e estado. Adicionar busca e filtros `Todos`, `Completos`, `Pendentes`. Estados usam texto além de cor.
 
-- [ ] **Step 3: Implementar diálogo da ficha**
+- [x] **Step 3: Implementar diálogo da ficha**
 
 Campos exatos:
 
@@ -450,11 +450,11 @@ reason:string;
 
 Parser aceita vírgula, zero e quatro casas; percentual entre 0 e 100. Ocultar valor quando incluído. Avisar sobre vigência passada.
 
-- [ ] **Step 4: Implementar cópia segura**
+- [x] **Step 4: Implementar cópia segura**
 
 Listar somente fichas da mesma conta. Copiar custo e imposto, nunca operação, vigência ou alvo. Exigir Salvar depois da prévia.
 
-- [ ] **Step 5: Implementar histórico e prévia**
+- [x] **Step 5: Implementar histórico e prévia**
 
 Mostrar revisão, origem `Dados anteriores`/`Cadastro`, motivo e vigência. Prévia usa última venda sem persistir.
 
@@ -462,7 +462,7 @@ Mostrar revisão, origem `Dados anteriores`/`Cadastro`, motivo e vigência. Pré
 
 Conferir anúncio sem variação, duas variações, SKU 64265, cópia, três modos de imposto, formato inválido, vigência passada, recarga após salvar e retorno de foco. Em 390×844, confirmar ausência de overflow.
 
-- [ ] **Step 7: Commitar Anúncios**
+- [x] **Step 7: Commitar Anúncios**
 
 ```bash
 git add components/ad-profiles-view.tsx components/ad-profile-dialog.tsx components/commerce-app.tsx components/finance-views.tsx components/commerce-controls.tsx app/globals.css lib/demo.ts
@@ -486,23 +486,23 @@ git commit -m "feat: add ad financial profile workspace"
 - Consumes: pendências, vendas projetadas, `POST /api/sale-corrections`, fechamentos e navegação para Anúncios/Full.
 - Produces: `PendingView`, `SaleCorrectionDialog` e `FullExpensesView`.
 
-- [ ] **Step 1: Criar lista de Pendências**
+- [x] **Step 1: Criar lista de Pendências**
 
 Ordenar Revisar antes de Ausente. Cada item mostra problema, conta, anúncio/pedido e uma ação: Configurar anúncio, Informar campo, Revisar correção, Fechar mês Full ou Revisar migração.
 
-- [ ] **Step 2: Implementar correção de um campo**
+- [x] **Step 2: Implementar correção de um campo**
 
 Se oficial for `null`, salvar `fallback`; se o usuário corrigir valor oficial, salvar `override`, mostrar ambos e exigir motivo. Nunca renderizar a composição inteira.
 
-- [ ] **Step 3: Exibir fontes no detalhe da venda**
+- [x] **Step 3: Exibir fontes no detalhe da venda**
 
 Mostrar Mercado Livre, Ficha do anúncio, Estimativa Full, Fechamento Full ou Correção em cada linha. Override stale mostra Revisar e bloqueia contribuição.
 
-- [ ] **Step 4: Mover fechamento para Despesas Full**
+- [x] **Step 4: Mover fechamento para Despesas Full**
 
 Envolver `FullClosurePanel` em página própria com conta, mês, total, unidades, média, exclusões e histórico. Remover linguagem de conciliação sem mudar rateio/API.
 
-- [ ] **Step 5: Atualizar navegação e badge**
+- [x] **Step 5: Atualizar navegação e badge**
 
 Substituir `reconciliation` por `pending`, adicionar `full-expenses` e contador. `#reconciliation` redireciona para `#pending`.
 
@@ -510,7 +510,7 @@ Substituir `reconciliation` por `pending`, adicionar `full-expenses` e contador.
 
 Testar fallback seguido de oficial, override seguido de mudança, fechamento Full ímpar e consistência com visão geral. Validar foco e celular.
 
-- [ ] **Step 7: Commitar Pendências e Full**
+- [x] **Step 7: Commitar Pendências e Full**
 
 ```bash
 git add components/pending-view.tsx components/sale-correction-dialog.tsx components/full-expenses-view.tsx components/full-closure-panel.tsx components/commerce-app.tsx components/finance-views.tsx app/globals.css
@@ -536,31 +536,31 @@ git commit -m "feat: replace reconciliation with focused pending actions"
 - Consumes: telas e projeção novas.
 - Produces: aplicação sem Conciliação, Custos e impostos nem Importar custos na navegação; legado disponível só para migração/auditoria.
 
-- [ ] **Step 1: Remover o fluxo visível antigo**
+- [x] **Step 1: Remover o fluxo visível antigo**
 
 Retirar botão, modais, imports e views de `commerce-app.tsx`. Apagar componentes somente depois de `rg` confirmar ausência de consumidores.
 
-- [ ] **Step 2: Limpar CSS e tipos demo**
+- [x] **Step 2: Limpar CSS e tipos demo**
 
 Remover seletores exclusivos das telas apagadas. `Workspace` mantém legado somente no servidor de migração, não na UI.
 
-- [ ] **Step 3: Atualizar README**
+- [x] **Step 3: Atualizar README**
 
 Documentar conectar conta, cadastrar ficha, acompanhar vendas, resolver Pendências, fechar Full e criar nova vigência quando custo mudar. Declarar que planilha nova não é necessária e arquivos antigos ficam arquivados.
 
-- [ ] **Step 4: Verificar linguagem legada**
+- [x] **Step 4: Verificar linguagem legada**
 
 Run: `rg -n "Conciliar|Conciliação|Vínculo com a planilha|Importar custos" components app README.md`
 
 Expected: nenhuma ocorrência visível; nomes internos de rotas legadas podem permanecer fora da UI.
 
-- [ ] **Step 5: Executar TypeScript e build**
+- [x] **Step 5: Executar TypeScript e build**
 
 Run: `npx tsc --noEmit && npm run build`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commitar transição**
+- [x] **Step 6: Commitar transição**
 
 ```bash
 git add -A components app/globals.css README.md lib/demo.ts

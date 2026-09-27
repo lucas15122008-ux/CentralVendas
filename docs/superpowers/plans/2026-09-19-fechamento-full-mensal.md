@@ -79,7 +79,7 @@
 - Produces: `requestCoordinator(run: () => Promise<void>): { poll(): Promise<void>; refresh(): Promise<void> }`.
 - `poll()` compartilha a consulta em voo; `refresh()` espera a consulta em voo e sempre inicia outra consulta depois.
 
-- [ ] **Step 1: Write the failing concurrency test**
+- [x] **Step 1: Write the failing concurrency test**
 
 ```ts
 test('refresh iniciado durante polling sempre executa uma leitura posterior',async()=>{
@@ -94,13 +94,13 @@ test('refresh iniciado durante polling sempre executa uma leitura posterior',asy
 });
 ```
 
-- [ ] **Step 2: Run the test and verify the missing module failure**
+- [x] **Step 2: Run the test and verify the missing module failure**
 
 Run: `node --test tests/request-coordinator.test.ts`
 
 Expected: FAIL because `requestCoordinator` does not exist.
 
-- [ ] **Step 3: Implement the coordinator**
+- [x] **Step 3: Implement the coordinator**
 
 ```ts
 export function requestCoordinator(run:()=>Promise<void>){
@@ -111,17 +111,17 @@ export function requestCoordinator(run:()=>Promise<void>){
 }
 ```
 
-- [ ] **Step 4: Wire polling and mutation reloads separately**
+- [x] **Step 4: Wire polling and mutation reloads separately**
 
 In `commerce-app.tsx`, replace the boolean `loadingRequest` with one coordinator held in a ref. Use `coordinator.poll` for initial load and `visiblePoll`; pass `coordinator.refresh` as `onReload` to `ReconciliationView`, `CostImporter`, `CostsView`, `MeliAccounts` and account creation callbacks. Preserve the existing loading and error state inside the coordinator's `run` function.
 
-- [ ] **Step 5: Run focused and existing tests**
+- [x] **Step 5: Run focused and existing tests**
 
 Run: `node --test tests/request-coordinator.test.ts tests/visible-poll.test.ts tests/reconciliation.test.ts`
 
 Expected: PASS. Saving during an in-flight poll causes two reads and the second read happens after the mutation.
 
-- [ ] **Step 6: Commit the reload fix**
+- [x] **Step 6: Commit the reload fix**
 
 ```bash
 git add lib/request-coordinator.ts tests/request-coordinator.test.ts components/commerce-app.tsx components/reconciliation-view.tsx
@@ -147,7 +147,7 @@ git commit -m "fix: refresh financial data after reconciliation"
 - Extends: `Sale` with `logisticType?: string | null`.
 - Consumes: shipment response `{ logistic?: { type?: string }, logistic_type?: string }`.
 
-- [ ] **Step 1: Add failing normalization tests**
+- [x] **Step 1: Add failing normalization tests**
 
 ```ts
 test('tipo fulfillment do envio alcança todas as linhas do pedido',()=>{
@@ -161,17 +161,17 @@ test('tipo logístico ausente permanece desconhecido',()=>{
 });
 ```
 
-- [ ] **Step 2: Run the protocol tests and observe failure**
+- [x] **Step 2: Run the protocol tests and observe failure**
 
 Run: `node --test tests/meli.test.ts`
 
 Expected: FAIL because `ShipmentCost` and `Sale` do not carry `logisticType`.
 
-- [ ] **Step 3: Extract the generic allocator without behavior change**
+- [x] **Step 3: Extract the generic allocator without behavior change**
 
 Move the existing `allocateCents` implementation byte-for-byte from `lib/meli/protocol.ts` to `lib/allocation.ts`, import it back into the protocol, and keep the existing cent-allocation test passing.
 
-- [ ] **Step 4: Normalize the shipment type into each sale line**
+- [x] **Step 4: Normalize the shipment type into each sale line**
 
 ```ts
 const shipmentById=new Map(shipments.map(shipment=>[shipment.id,shipment]));
@@ -181,11 +181,11 @@ rows.push({...existingLine,logisticType});
 
 Add `logisticType:null` to every test fixture that constructs `ShipmentCost`.
 
-- [ ] **Step 5: Add a failing service test for the official shipment detail**
+- [x] **Step 5: Add a failing service test for the official shipment detail**
 
 The mock must expect `GET /shipments/789`, return `{id:789,logistic:{type:'fulfillment'}}`, and assert that the persisted line has `logisticType === 'fulfillment'`. A 403 or 404 from only that detail request must leave `logisticType === null` while still saving shipment costs and order data.
 
-- [ ] **Step 6: Fetch and validate shipment details independently**
+- [x] **Step 6: Fetch and validate shipment details independently**
 
 Inside `enrich`, parse both current and legacy response shapes:
 
@@ -202,13 +202,13 @@ shipment.logisticType=detail.logistic?.type??detail.logistic_type??null;
 
 Keep this call in its own `try/catch`: 403 and 404 leave the field unknown; timeout, 429 and upstream errors stay recoverable failures. The existing `x-format-new: true` header in `remote()` is retained.
 
-- [ ] **Step 7: Run protocol and service tests**
+- [x] **Step 7: Run protocol and service tests**
 
 Run: `node --test tests/meli.test.ts tests/meli-service.test.ts tests/meli-jobs.test.ts`
 
 Expected: PASS, including partial enrichment and webhook retry behavior.
 
-- [ ] **Step 8: Commit the logistics signal**
+- [x] **Step 8: Commit the logistics signal**
 
 ```bash
 git add lib/allocation.ts lib/meli/protocol.ts lib/meli/service.ts lib/finance.ts tests/meli.test.ts tests/meli-service.test.ts tests/helpers/meli.ts
@@ -232,7 +232,7 @@ git commit -m "feat: capture Mercado Livre logistics type"
 - Produces: `resolveOperation(logisticType, manualChannel, productChannel): Sale['operation']`.
 - Consumes: `Sale.logisticType` from Task 2.
 
-- [ ] **Step 1: Write failing precedence and isolation tests**
+- [x] **Step 1: Write failing precedence and isolation tests**
 
 ```ts
 test('envio oficial prevalece e divergência do anúncio fica visível',()=>{
@@ -251,19 +251,19 @@ test('duas ofertas do SKU 64265 mantêm operações diferentes',()=>{
 
 Also cover `not_specified` as unknown, known non-Full types as `other`, a valid manual sale classification above the product default, and a stale manual adjustment that cannot classify the sale.
 
-- [ ] **Step 2: Run reconciliation tests and verify failure**
+- [x] **Step 2: Run reconciliation tests and verify failure**
 
 Run: `node --test tests/reconciliation-engine.test.ts tests/reconciliation.test.ts`
 
 Expected: FAIL because the derived operation and product channel do not exist.
 
-- [ ] **Step 3: Implement `resolveOperation` and include logistics in the source stamp**
+- [x] **Step 3: Implement `resolveOperation` and include logistics in the source stamp**
 
 Known official common types are `drop_off`, `cross_docking`, `xd_drop_off`, `self_service`, `default` and `custom`. `fulfillment` maps to Full. Missing, `not_specified` and unrecognized values remain unknown. Compare the official result with explicit manual/product values and attach the conflict message without replacing the official value.
 
 Add `logisticType` to `saleSourceStamp`, so a later official enrichment invalidates a conflicting manual confirmation.
 
-- [ ] **Step 4: Apply operation only from valid sources**
+- [x] **Step 4: Apply operation only from valid sources**
 
 In `applyReconciliation`:
 
@@ -273,17 +273,17 @@ In `applyReconciliation`:
 4. call `resolveOperation` with official type, valid manual channel and product channel;
 5. preserve old product payloads by treating absent `channel` as `unknown`.
 
-- [ ] **Step 5: Extend the reconciliation API contract**
+- [x] **Step 5: Extend the reconciliation API contract**
 
 Add optional `channel` to product `set`, defaulting to `unknown`. Persist `{kind:'product',sku,channel}`. Keep existing clients valid and retain account/item/variation/vigency/revision guards.
 
-- [ ] **Step 6: Run focused tests and typecheck**
+- [x] **Step 6: Run focused tests and typecheck**
 
 Run: `node --test tests/reconciliation-engine.test.ts tests/reconciliation.test.ts && npx tsc --noEmit`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit classification behavior**
+- [x] **Step 7: Commit classification behavior**
 
 ```bash
 git add lib/finance.ts lib/reconciliation.ts app/api/reconciliation/route.ts tests/reconciliation-engine.test.ts tests/reconciliation.test.ts
@@ -314,7 +314,7 @@ export function applyFullClosures(sales:Sale[],closures:FullClosure[]):Sale[];
 export function parseBrlCents(input:string):number|null;
 ```
 
-- [ ] **Step 1: Write failing eligibility and exact-allocation tests**
+- [x] **Step 1: Write failing eligibility and exact-allocation tests**
 
 Cover these concrete cases:
 
@@ -332,17 +332,17 @@ Also assert stable odd-cent distribution, exclusion of common/pending/refunded/u
 
 Add currency parsing cases for `R$ 10.000,00`, `0,01`, more than two decimal places, negative input, empty input and unsafe totals. Only valid non-negative amounts with at most two decimal places become cent integers.
 
-- [ ] **Step 2: Run the new test and verify missing-module failure**
+- [x] **Step 2: Run the new test and verify missing-module failure**
 
 Run: `node --test tests/full-reconciliation.test.ts`
 
 Expected: FAIL because the engine does not exist.
 
-- [ ] **Step 3: Implement preview and deterministic source material**
+- [x] **Step 3: Implement preview and deterministic source material**
 
 Sort eligible sales by `sale.id`. Eligibility requires matching account/month, `status === 'paid'`, `operation.channel === 'full'`, and a positive integer `costQuantity`. Build `fullMonthSource` as stable JSON containing sale ID, date, units, operation source/type, `saleSourceStamp` material and selected cost ID. Do not include display labels.
 
-- [ ] **Step 4: Implement allocation with the shared rateator**
+- [x] **Step 4: Implement allocation with the shared rateator**
 
 ```ts
 const cents=allocateCents(totalExpenseCents,preview.eligible.map(sale=>sale.costQuantity!));
@@ -351,7 +351,7 @@ return preview.eligible.map((sale,index)=>({saleId:sale.id,units:sale.costQuanti
 
 Reject unsafe totals, zero eligible units and any manual Full conflict before allocating.
 
-- [ ] **Step 5: Implement closed and provisional projection**
+- [x] **Step 5: Implement closed and provisional projection**
 
 Extend `Sale` with:
 
@@ -362,17 +362,17 @@ fullClosureState?:'stale';
 
 For each valid latest closure, apply its stored allocation. For an open month, find the latest earlier non-stale closure from the same account and estimate `Math.round(totalExpenseCents / eligibleUnits * sale.costQuantity)`. If there is no prior closure, set no value. A stale closure marks affected lines stale and does not apply new source data silently.
 
-- [ ] **Step 6: Add projection tests**
+- [x] **Step 6: Add projection tests**
 
 Assert closed values replace estimates, another account is ignored, first month remains without estimate, prior unit rate creates `estimated`, and stale closure sets `fullClosureState === 'stale'` without reporting a final contribution.
 
-- [ ] **Step 7: Run the engine suite**
+- [x] **Step 7: Run the engine suite**
 
 Run: `node --test tests/full-reconciliation.test.ts tests/reconciliation.test.ts tests/finance.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit the pure engine**
+- [x] **Step 8: Commit the pure engine**
 
 ```bash
 git add lib/full-reconciliation.ts lib/finance.ts tests/full-reconciliation.test.ts
@@ -407,17 +407,17 @@ type FullClosureCommand={
 
 - Produces: `loadFullClosures(db,owner)` and `saveFullClosure(db,owner,command,projection)` in `lib/full-closure-store.ts`.
 
-- [ ] **Step 1: Add migration assertions before creating schema**
+- [x] **Step 1: Add migration assertions before creating schema**
 
 In `tests/migrations.test.ts`, assert the final migrated database contains `full_closure_events`, `full_closure_allocations`, owner/request uniqueness, account/month/revision uniqueness, allocation `(closure_id,sale_id)` uniqueness, owner/account indexes and `meli_connections.logistics_version NOT NULL DEFAULT 1`.
 
-- [ ] **Step 2: Run the migration test and verify failure**
+- [x] **Step 2: Run the migration test and verify failure**
 
 Run: `node --test tests/migrations.test.ts`
 
 Expected: FAIL because the tables and column do not exist.
 
-- [ ] **Step 3: Add the Drizzle schema and generate one migration**
+- [x] **Step 3: Add the Drizzle schema and generate one migration**
 
 Schema shape:
 
@@ -441,11 +441,11 @@ Run: `npx drizzle-kit generate --name monthly_full_closures`
 
 Expected: creates exactly `drizzle/0007_monthly_full_closures.sql` and its snapshot. Inspect the SQL before continuing.
 
-- [ ] **Step 4: Schedule one safe logistics reread**
+- [x] **Step 4: Schedule one safe logistics reread**
 
 Mirror the established gross-sales-version transition in `MeliService.sync`: when `logistics_version < 2`, atomically set it to `2`, clear `sync_cursor`, and mark the current run as needing history. Do not delete existing orders or reconciliation events. Add a service test proving the reset occurs once and later runs are incremental.
 
-- [ ] **Step 5: Write failing API integration cases**
+- [x] **Step 5: Write failing API integration cases**
 
 Extend `tests/api.local.mjs` with a fixture account containing Full/common lines. Assert:
 
@@ -457,7 +457,7 @@ Extend `tests/api.local.mjs` with a fixture account containing Full/common lines
 - `clear` creates a new revision and preserves prior records;
 - allocation insert failure rolls back the header.
 
-- [ ] **Step 6: Implement private loading and atomic save**
+- [x] **Step 6: Implement private loading and atomic save**
 
 `saveFullClosure` must:
 
@@ -469,11 +469,11 @@ Extend `tests/api.local.mjs` with a fixture account containing Full/common lines
 6. check the header result and return 409 on a lost revision race;
 7. return the persisted event.
 
-- [ ] **Step 7: Implement GET preview and POST validation**
+- [x] **Step 7: Implement GET preview and POST validation**
 
 Use strict Zod limits: UUID request/account IDs, `YYYY-MM`, non-negative safe integer cents up to `1_000_000_000_000`, revision `0..1_000_000`, and reason `3..240`. Reuse `owner(request)` for same-origin mutation protection. Return only rows owned by the authenticated user.
 
-- [ ] **Step 8: Run persistence and API tests**
+- [x] **Step 8: Run persistence and API tests**
 
 Run: `node --test tests/migrations.test.ts tests/full-reconciliation.test.ts`
 
@@ -481,7 +481,7 @@ Then start the local server and run: `npm run test:api:local`
 
 Expected: all migration and API cases pass; failed or concurrent writes leave no partial allocations.
 
-- [ ] **Step 9: Commit storage and API**
+- [x] **Step 9: Commit storage and API**
 
 ```bash
 git add db/schema.ts drizzle lib/meli/service.ts lib/full-closure-store.ts app/api/full-closures/route.ts tests/migrations.test.ts tests/meli-service.test.ts tests/api.local.mjs
@@ -507,7 +507,7 @@ git commit -m "feat: persist monthly Full closings"
 - Produces: `Workspace.fullClosures: FullClosureSummary[]` and projected `Workspace.sales` with effective Full expense.
 - Extends: `SaleResult` with `resultState:'pending'|'provisional'|'automatic'|'closed'|'manual'|'stale'`.
 
-- [ ] **Step 1: Add failing financial calculation tests**
+- [x] **Step 1: Add failing financial calculation tests**
 
 ```ts
 test('fechamento mensal substitui zero manual e deduz uma vez',()=>{
@@ -520,13 +520,13 @@ test('fechamento mensal substitui zero manual e deduz uma vez',()=>{
 
 Also assert: provisional state, first Full month pending, positive manual Full wins only before closure, stale closure forces null contribution, and common automatic sale remains automatic.
 
-- [ ] **Step 2: Run financial tests and verify failure**
+- [x] **Step 2: Run financial tests and verify failure**
 
 Run: `node --test tests/finance.test.ts tests/reconciliation.test.ts tests/full-reconciliation.test.ts`
 
 Expected: FAIL because calculation ignores projected Full expense/status.
 
-- [ ] **Step 3: Centralize the effective Full expense**
+- [x] **Step 3: Centralize the effective Full expense**
 
 In `calculateSale`, select one source:
 
@@ -538,7 +538,7 @@ const fullExpenseCents=projectedFull??manualFull;
 
 The closure API already blocks `manualFull > 0`; calculation must still avoid addition of both values. Add the selected amount once to contribution and expose its origin through `saleBreakdownRows`.
 
-- [ ] **Step 4: Verify closure freshness while building the workspace**
+- [x] **Step 4: Verify closure freshness while building the workspace**
 
 In `app/api/workspace/route.ts`:
 
@@ -549,11 +549,11 @@ In `app/api/workspace/route.ts`:
 5. call `applyFullClosures`;
 6. return projected sales and closure summaries with `Cache-Control: private, no-store`.
 
-- [ ] **Step 5: Add the integrated regression for the user's saved reconciliation**
+- [x] **Step 5: Add the integrated regression for the user's saved reconciliation**
 
 In `tests/api.local.mjs`, after saving a complete manual adjustment, fetch `/api/workspace` again and calculate/inspect the returned sale. Assert its contribution changed, its status is manual, and a subsequent fresh request preserves the same values. Then close a Full month and assert the workspace response contains the closed parcel and changed contribution.
 
-- [ ] **Step 6: Run domain and local API tests**
+- [x] **Step 6: Run domain and local API tests**
 
 Run: `npm test`
 
@@ -561,7 +561,7 @@ Then with the local server: `npm run test:api:local`
 
 Expected: all tests pass and the saved values are visible on the very next post-mutation load.
 
-- [ ] **Step 7: Commit unified financial projection**
+- [x] **Step 7: Commit unified financial projection**
 
 ```bash
 git add lib/finance.ts lib/full-reconciliation.ts lib/demo.ts app/api/workspace/route.ts tests/finance.test.ts tests/reconciliation.test.ts tests/full-reconciliation.test.ts tests/api.local.mjs
@@ -585,7 +585,7 @@ git commit -m "feat: apply Full closings to financial results"
 - Consumes: `Workspace.fullClosures`, `Sale.operation`, `Sale.fullExpense`, product-link reconciliation events, and `refresh()` from Task 1.
 - Produces: product-offer configuration and monthly close/clear actions through existing `/api/reconciliation` and new `/api/full-closures`.
 
-- [ ] **Step 1: Implement the product-offer dialog from server-derived rows**
+- [x] **Step 1: Implement the product-offer dialog from server-derived rows**
 
 `ProductLogisticsDialog` receives one account/SKU product and builds unique `(itemId,variationId)` rows from real sales. Each row shows effective operation, source, conflict, current cost link and vigency. The form posts:
 
@@ -599,19 +599,19 @@ git commit -m "feat: apply Full closings to financial results"
 
 Use labels `Detectar pelo Mercado Livre`, `Mercado Livre Full` and `Venda comum`. Disable mutation in demonstration mode. After success, await the forced `refresh()` and then show the toast.
 
-- [ ] **Step 2: Expose the dialog in Produtos**
+- [x] **Step 2: Expose the dialog in Produtos**
 
 Add an `Operação` column and `Configurar anúncios` action in `ProductsView`. A SKU with mixed offers shows `Full e comum`; conflicts show `Revisar`. Continue grouping financial totals by account/SKU and never merge equal SKUs from different accounts.
 
-- [ ] **Step 3: Implement the monthly preview panel**
+- [x] **Step 3: Implement the monthly preview panel**
 
 `FullClosurePanel` contains exact account and month selectors, fetches `GET /api/full-closures`, and displays eligible sales, units, exclusions, previous unit rate, estimated total and latest status. The close form accepts a Brazilian currency string, converts it with `parseBrlCents` from Task 4, requires a reason and posts a UUID request ID with the expected revision.
 
-- [ ] **Step 4: Implement confirmation and history behavior**
+- [x] **Step 4: Implement confirmation and history behavior**
 
 Before POST `set`, show total, units and average per unit. Disable closing for zero eligible units or conflicts. Show `Aberto`, `Provisório`, `Fechado` and `Revisar`. A `Retirar fechamento` action posts `clear`, preserves history and requires a reason. Network failure keeps every typed value.
 
-- [ ] **Step 5: Update financial labels and details**
+- [x] **Step 5: Update financial labels and details**
 
 In Overview, Sales and Products:
 
@@ -621,17 +621,17 @@ In Overview, Sales and Products:
 - render `Despesa Full estimada` or `Despesa Full fechada` as a separate breakdown row;
 - show month, origin and average unit rate in the sale detail.
 
-- [ ] **Step 6: Add responsive and accessible styling**
+- [x] **Step 6: Add responsive and accessible styling**
 
 Use existing panel, table, dialog, badge and focus patterns. At widths below 960px stack monthly metrics into two columns; below 640px use one column, full-width controls and scrollable tables. Associate every input with a visible label, preserve keyboard close/focus behavior, and use text in addition to badge color.
 
-- [ ] **Step 7: Run static verification**
+- [x] **Step 7: Run static verification**
 
 Run: `npx tsc --noEmit && npm run build`
 
 Expected: PASS with no client/server type leakage.
 
-- [ ] **Step 8: Commit the interfaces**
+- [x] **Step 8: Commit the interfaces**
 
 ```bash
 git add components/full-closure-panel.tsx components/product-logistics-dialog.tsx components/commerce-app.tsx components/reconciliation-view.tsx components/finance-views.tsx app/globals.css lib/demo.ts
@@ -650,7 +650,7 @@ git commit -m "feat: add Full closing workflow"
 - Consumes: complete feature from Tasks 1–7.
 - Produces: published private Sites version and verified production migration.
 
-- [ ] **Step 1: Document the operator workflow**
+- [x] **Step 1: Document the operator workflow**
 
 Add concise README instructions:
 
@@ -698,7 +698,7 @@ Capture console and network errors; fix any product-code defect and rerun only t
 
 At 390×844, verify navigation, product dialog, monthly panel, confirmation, history and sale detail without clipped controls or horizontal page overflow. Tab through inputs/buttons and confirm labels, focus visibility and dialog return focus.
 
-- [ ] **Step 6: Request an independent code review**
+- [x] **Step 6: Request an independent code review**
 
 Use `superpowers:requesting-code-review` against the complete branch. Resolve verified high/medium findings using `superpowers:receiving-code-review`, then rerun affected tests.
 
@@ -716,7 +716,7 @@ git status --short
 
 Expected: green output, no unexpected working-tree changes, and only the intended README or review fixes waiting to commit.
 
-- [ ] **Step 8: Commit documentation and review fixes**
+- [x] **Step 8: Commit documentation and review fixes**
 
 ```bash
 git add README.md
