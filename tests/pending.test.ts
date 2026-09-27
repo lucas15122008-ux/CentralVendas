@@ -33,14 +33,31 @@ test('gera cada tipo de pendência com ID estável',()=>{
   result(sale({id:'first-full',orderId:'first-full',operation:{channel:'full',source:'meli'},adProfile:{eventId:'p',revision:1,validFrom:'2026-01-01',unitCostTenThousandths:1_000_000,tax:{mode:'included'}}})),
   result(sale({id:'stale-correction',orderId:'stale-correction',correctionState:'stale',adProfile:{eventId:'p',revision:1,validFrom:'2026-01-01',unitCostTenThousandths:1_000_000,tax:{mode:'included'}}})),
   result(sale({id:'stale-full',orderId:'stale-full',operation:{channel:'full',source:'meli'},fullClosureState:'stale',adProfile:{eventId:'p',revision:1,validFrom:'2026-01-01',unitCostTenThousandths:1_000_000,tax:{mode:'included'}}})),
+  result(sale({id:'missing-profile',orderId:'missing-profile',itemId:'MLB-NO-PROFILE'})),
  ];
- const input={sales:rows,listings:[listing(),listing({id:'listing-no-sale',itemId:'MLB-NO-SALE',title:'Sem venda',hasProfile:false})],migrationIssues:[{accountId,itemId:'MLB-CONFLICT',variationId:null,code:'projection_difference' as const,message:'A projeção mudaria.'}]};
+ const input={sales:rows,listings:[listing(),listing({id:'listing-no-profile',itemId:'MLB-NO-PROFILE',title:'Com venda',hasProfile:false}),listing({id:'listing-no-sale',itemId:'MLB-NO-SALE',title:'Sem venda',hasProfile:false})],migrationIssues:[{accountId,itemId:'MLB-CONFLICT',variationId:null,code:'projection_difference' as const,message:'A projeção mudaria.'}]};
  const first=collectPending(input),second=collectPending(input);
  const kinds=new Set(first.map(item=>item.kind));
  for(const kind of ['missing_profile','missing_cost','missing_tax','missing_meli_field','unknown_operation','missing_full_reference','stale_correction','stale_full_closure','migration_conflict'])assert.ok(kinds.has(kind as never),kind);
  assert.deepEqual(first.map(item=>item.id),second.map(item=>item.id));
  assert.equal(new Set(first.map(item=>item.id)).size,first.length);
  assert.equal(first.find(item=>item.kind==='missing_meli_field')?.field,'revenueCents');
+ assert.equal(first.some(item=>item.itemId==='MLB-NO-SALE'),false);
+});
+
+test('pendências Full do mesmo mês e conta pedem um único total mensal',()=>{
+ const full=(id:string,date:string)=>result(sale({id,orderId:id,date,operation:{channel:'full',source:'meli'},adProfile:{eventId:'p',revision:1,validFrom:'2026-01-01',unitCostTenThousandths:1_000_000,tax:{mode:'included'}}}));
+ const pending=collectPending({sales:[full('sep-1','2026-09-01'),full('sep-2','2026-09-20'),full('aug','2026-08-31')],listings:[listing()],migrationIssues:[]});
+ const fullItems=pending.filter(item=>item.kind==='missing_full_reference');
+ assert.equal(fullItems.length,2);
+ assert.ok(fullItems.some(item=>item.title.includes('09/2026')&&item.message.includes('2 vendas')));
+ assert.ok(fullItems.some(item=>item.title.includes('08/2026')&&item.message.includes('1 venda')));
+});
+
+test('reembolso Full não pede fechamento mensal de venda inelegível',()=>{
+ const refunded=result(sale({id:'refund-full',status:'refunded',revenueCents:null,costQuantity:null,operation:{channel:'full',source:'meli'},adProfile:{eventId:'p',revision:1,validFrom:'2026-01-01',unitCostTenThousandths:1_000_000,tax:{mode:'included'}}}));
+ const pending=collectPending({sales:[refunded],listings:[listing()],migrationIssues:[]});
+ assert.equal(pending.some(item=>item.kind==='missing_full_reference'),false);
 });
 
 test('custo e imposto zero declarados não criam pendência',()=>{

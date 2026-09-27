@@ -2,11 +2,11 @@ import {z} from 'zod';
 import {accountLease,type WriteGuard} from './lease.ts';
 import {randomToken,seal,unseal,pkceChallenge} from './crypto.ts';
 import {authorizationUrl,remoteId,orderSchema,normalizeOrders,type MeliOrder,type ShipmentCost} from './protocol.ts';
-import {parseSellerDiscounts,type SellerDiscountSummary} from './discounts.ts';
+import {hasNoPromotionEvidence,parseSellerDiscounts,type SellerDiscountSummary} from './discounts.ts';
 import {parseCatalogPage} from './catalog.ts';
 export const CALLBACK_URL='https://central-vendas-lucas.kisashi.chatgpt.site/api/meli/callback';
 export const CATALOG_REFRESH_MS=3600000;
-export class MeliError extends Error {status:number;upstreamStatus:number|null;constructor(status:number,message:string,upstreamStatus:number|null=null){super(message);this.status=status;this.upstreamStatus=upstreamStatus;}}
+export class MeliError extends Error {status:number;upstreamStatus:number|null;code:string|null;constructor(status:number,message:string,upstreamStatus:number|null=null,code:string|null=null){super(message);this.status=status;this.upstreamStatus=upstreamStatus;this.code=code;}}
 const configSchema=z.object({clientId:z.string().trim().regex(/^\d{3,30}$/),clientSecret:z.string().trim().min(8).max(500),pkce:z.boolean()});
 const tokenSchema=z.object({access_token:z.string().min(1).max(10000),refresh_token:z.string().min(1).max(10000),expires_in:z.number().int().positive().max(86400*365),user_id:remoteId});
 type App={owner_id:string;client_id:string;secret:string;pkce:number;revision:string};
@@ -63,8 +63,9 @@ export class MeliService {
    const knownCodes=new Set(['bad_request','invalid_limit','invalid_token','invalid_grant','invalid_client','invalid_request','unauthorized','forbidden','not_found','discount_not_found','too_many_requests','internal_server_error']);
    let detail:Record<string,unknown>={};
    try{const data=await response.json();if(data&&typeof data==='object'&&!Array.isArray(data))detail=data as Record<string,unknown>;}catch{/* Non-JSON responses are identified by resource and status only. */}
-   console.error('meli_upstream_error',{resource:path.split('?')[0].replace(/\/\d+(?=\/|$)/g,'/:id'),status,code:typeof detail.error==='string'&&knownCodes.has(detail.error)?detail.error:'unrecognized_error'});
-   throw new MeliError(status===401?401:status===403?403:status===404?404:status===429?429:502,status===401?'A autorização expirou. Reconecte esta conta.':status===403?'A aplicação não tem acesso a este recurso. Confira as permissões no Mercado Livre.':status===429?'O Mercado Livre pediu uma pausa. Retome a atualização em alguns minutos.':'Não foi possível consultar este recurso no Mercado Livre.',status);
+   const code=typeof detail.error==='string'&&knownCodes.has(detail.error)?detail.error:'unrecognized_error';
+   console.error('meli_upstream_error',{resource:path.split('?')[0].replace(/\/\d+(?=\/|$)/g,'/:id'),status,code});
+   throw new MeliError(status===401?401:status===403?403:status===404?404:status===429?429:502,status===401?'A autorização expirou. Reconecte esta conta.':status===403?'A aplicação não tem acesso a este recurso. Confira as permissões no Mercado Livre.':status===429?'O Mercado Livre pediu uma pausa. Retome a atualização em alguns minutos.':'Não foi possível consultar este recurso no Mercado Livre.',status,code);
   }
   try{return await response.json() as unknown}catch{throw new MeliError(502,'O Mercado Livre retornou dados incompletos. Tente novamente.');}
  }
@@ -146,7 +147,11 @@ export class MeliService {
    const discountState=new Map<string,SellerDiscountSummary|null>();
    for(const order of orders.values()){
     try{discountState.set(order.id,parseSellerDiscounts(order,await get('/orders/'+order.id+'/discounts')));}
-    catch(error){if(error instanceof MeliError&&![403,404].includes(error.status))throw error;discountState.set(order.id,null);}
+    catch(error){
+     if(error instanceof MeliError&&![403,404].includes(error.status))throw error;
+     const noDiscount=error instanceof MeliError&&error.upstreamStatus===404&&error.code==='discount_not_found'&&hasNoPromotionEvidence(order);
+     discountState.set(order.id,noDiscount?{sellerCentsByLine:order.order_items.map(()=>0),hasDiscounts:false}:null);
+    }
    }
    return normalizeOrders(id,seller,[...orders.values()],shipments,discountState);
  }
@@ -164,8 +169,8 @@ export class MeliService {
     if(!reset)throw new MeliError(409,'A conexão mudou antes da releitura logística. Tente novamente.');
     await this.db.prepare("UPDATE meli_sync_runs SET status='complete',needs_more=1,lease=NULL,lease_until=NULL,error=NULL WHERE account_id=? AND owner_id=? AND generation=?").bind(id,owner,c.generation).run();
    }
-   if(c.financials_version<2){
-    const reset=await this.db.prepare(`UPDATE meli_connections SET financials_version=2,sync_cursor=NULL WHERE account_id=? AND owner_id=? AND generation=? AND financials_version<2 AND ${guard.sql} RETURNING account_id`).bind(id,owner,c.generation,...guard.values()).first();
+   if(c.financials_version<3){
+    const reset=await this.db.prepare(`UPDATE meli_connections SET financials_version=3,sync_cursor=NULL WHERE account_id=? AND owner_id=? AND generation=? AND financials_version<3 AND ${guard.sql} RETURNING account_id`).bind(id,owner,c.generation,...guard.values()).first();
     if(!reset)throw new MeliError(409,'A conexão mudou antes da releitura financeira. Tente novamente.');
     await this.db.prepare("UPDATE meli_sync_runs SET status='complete',needs_more=1,lease=NULL,lease_until=NULL,error=NULL WHERE account_id=? AND owner_id=? AND generation=?").bind(id,owner,c.generation).run();
    }

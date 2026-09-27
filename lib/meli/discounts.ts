@@ -20,6 +20,17 @@ const discountResponse=z.object({
  })).max(100),
 });
 
+export function hasNoPromotionEvidence(order:MeliOrder):boolean{
+ if(order.tags?.some(tag=>/discount|coupon|cashback|promotion|promo/i.test(tag)))return false;
+ if(order.payments?.some(payment=>(payment.coupon_amount??0)>0))return false;
+ return order.order_items.every(line=>
+  line.unit_price!=null&&line.gross_price!=null&&
+  Math.round(line.gross_price*100)===Math.round(line.unit_price*line.quantity*100)&&
+  (line.full_unit_price==null||Math.round(line.full_unit_price*100)===Math.round(line.unit_price*100))&&
+  !line.discounts?.length
+ );
+}
+
 export function parseSellerDiscounts(order:MeliOrder,input:unknown):SellerDiscountSummary|null{
  const parsed=discountResponse.safeParse(input);
  if(!parsed.success)return null;

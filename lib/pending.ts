@@ -27,12 +27,14 @@ export function collectPending(input:{sales:SaleResult[];listings:MeliListing[];
  const seen=new Set<string>();
  const add=(item:PendingItem)=>{if(!seen.has(item.id)){seen.add(item.id);pending.push(item);}};
  const listings=new Map(input.listings.map(row=>[targetKey(row.accountId,row.itemId,row.variationId),row]));
+ const affectedTargets=new Set(input.sales.flatMap(sale=>sale.status==='paid'&&sale.costCents===null&&sale.costQuantity!==null&&sale.itemId?[targetKey(sale.accountId,sale.itemId,sale.variationId)]:[]));
  const missingProfiles=new Set<string>();
  for(const row of input.listings){
-  if(row.status==='closed'||row.hasProfile!==false)continue;
+  if(row.status==='closed'||row.hasProfile!==false||!affectedTargets.has(targetKey(row.accountId,row.itemId,row.variationId)))continue;
   const target=targetKey(row.accountId,row.itemId,row.variationId);missingProfiles.add(target);
   add({id:pendingId('missing_profile',[row.accountId,row.itemId,row.variationId]),kind:'missing_profile',accountId:row.accountId,itemId:row.itemId,variationId:row.variationId,title:row.title,message:'Informe custo e imposto para calcular a margem deste anúncio.',action:'edit_profile'});
  }
+ const fullMonths=new Map<string,{accountId:string;month:string;count:number}>();
  const fields:CorrectableField[]=['revenueCents','feeCents','shippingCents','otherCents','costQuantity'];
  const labels:Record<CorrectableField,string>={revenueCents:'receita',feeCents:'tarifa',shippingCents:'frete do vendedor',otherCents:'despesas promocionais',costQuantity:'quantidade consumida'};
  for(const sale of input.sales){
@@ -52,8 +54,10 @@ export function collectPending(input:{sales:SaleResult[];listings:MeliListing[];
   if(sale.operation?.channel==='unknown'){
    add({id:pendingId('unknown_operation',[sale.accountId,sale.id]),kind:'unknown_operation',accountId:sale.accountId,saleId:sale.id,itemId:sale.itemId,variationId:sale.variationId,title,message:'A modalidade logística não foi confirmada; pode existir despesa Full.',action:sale.itemId?'edit_profile':'correct_sale'});
   }
-  if(sale.operation?.channel==='full'&&sale.fullExpenseCents===null&&sale.fullClosureState!=='stale'){
-   add({id:pendingId('missing_full_reference',[sale.accountId,sale.id]),kind:'missing_full_reference',accountId:sale.accountId,saleId:sale.id,itemId:sale.itemId,variationId:sale.variationId,title,message:'Ainda não existe referência mensal para ratear a despesa Full.',action:'review_full'});
+  if(sale.status==='paid'&&sale.operation?.channel==='full'&&sale.fullExpenseCents===null&&sale.fullClosureState!=='stale'&&Number.isSafeInteger(sale.costQuantity)&&sale.costQuantity!>0){
+   const month=sale.date.slice(0,7),key=JSON.stringify([sale.accountId,month]);
+   const saved=fullMonths.get(key)??{accountId:sale.accountId,month,count:0};
+   saved.count++;fullMonths.set(key,saved);
   }
   if(sale.correctionState==='stale'){
    add({id:pendingId('stale_correction',[sale.accountId,sale.id]),kind:'stale_correction',accountId:sale.accountId,saleId:sale.id,itemId:sale.itemId,variationId:sale.variationId,title,message:'O valor oficial mudou depois da correção manual.',action:'correct_sale'});
@@ -61,6 +65,9 @@ export function collectPending(input:{sales:SaleResult[];listings:MeliListing[];
   if(sale.fullClosureState==='stale'){
    add({id:pendingId('stale_full_closure',[sale.accountId,sale.id]),kind:'stale_full_closure',accountId:sale.accountId,saleId:sale.id,itemId:sale.itemId,variationId:sale.variationId,title,message:'As vendas do mês mudaram depois do fechamento Full.',action:'review_full'});
   }
+ }
+ for(const {accountId,month,count} of fullMonths.values()){
+  add({id:pendingId('missing_full_reference',[accountId,month]),kind:'missing_full_reference',accountId,title:`Despesas Full de ${month.slice(5,7)}/${month.slice(0,4)}`,message:`${count} ${count===1?'venda Full aguarda':'vendas Full aguardam'} um total mensal para o rateio.`,action:'review_full'});
  }
  for(const issue of input.migrationIssues){
   add({id:pendingId('migration_conflict',[issue.accountId,issue.itemId,issue.variationId,issue.code,issue.message]),kind:'migration_conflict',accountId:issue.accountId,itemId:issue.itemId,variationId:issue.variationId,title:`Migração de ${issue.itemId||'venda histórica'}`,message:issue.message,action:'review_migration'});

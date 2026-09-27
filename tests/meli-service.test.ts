@@ -47,6 +47,21 @@ test('falha ao salvar um membro do frete reverte o lote inteiro',async()=>{const
 test('configuração não troca enquanto há autorização ativa',async()=>{const x=setup();await x.authorize();await assert.rejects(x.service.configure('owner',{clientId:'999',clientSecret:'replacement',pkce:false}));assert.equal((await x.service.status('owner')).app.clientId,'123');});
 test('erro 401 exige reconexão e mantém os pedidos já importados',async()=>{const x=setup();await x.authorize();x.setHandler(async()=>new Response(null,{status:401}));await assert.rejects(x.service.sync('owner','a'));assert.equal((await x.service.status('owner')).connections[0].status,'reconnect');});
 test('frete com apenas parte das unidades fica pendente',async()=>{const x=setup();await x.authorize();x.setHandler(async url=>{if(url.pathname.endsWith('/discounts'))return Response.json({details:[]});if(url.pathname==='/orders/search')return Response.json({paging:{total:1,offset:0},results:[{...order(),order_items:[{...order().order_items[0],quantity:2}]}]});if(url.pathname==='/shipments/789')return Response.json({id:789,logistic:{type:'drop_off'}});if(url.pathname.endsWith('/items'))return Response.json([{order_id:100,sender_id:456,item_id:'MLB123',variation_id:null,quantity:1}]);if(url.pathname.endsWith('/discounts'))return Response.json({details:[]});return Response.json({senders:[{user_id:456,cost:10}]})});await x.service.sync('owner','a');assert.equal(JSON.parse(String(x.sqlite.prepare('SELECT data FROM meli_orders').get()?.data))[0].shippingCents,null);});
+test('discount_not_found só confirma zero quando o pedido não sinaliza promoção',async()=>{
+ const x=setup();await x.authorize();
+ const plain={...order(100),shipping:null,order_items:[{...order().order_items[0],gross_price:100,discounts:[]}]};
+ const promoted={...order(101),shipping:null,order_items:[{...order().order_items[0],gross_price:120,discounts:[{amounts:{full:20,seller:5}}]}]};
+ const otherError={...order(102),shipping:null,order_items:[{...order().order_items[0],gross_price:100,discounts:[]}]};
+ x.setHandler(async url=>{
+  if(url.pathname==='/orders/search')return Response.json({paging:{total:3,offset:0,limit:5},results:[plain,promoted,otherError]});
+  if(url.pathname.endsWith('/discounts'))return Response.json({error:url.pathname.includes('/102/')?'not_found':'discount_not_found'},{status:404});
+  throw Error(url.pathname);
+ });
+ await x.service.sync('owner','a');
+ const rows=x.sqlite.prepare('SELECT order_id,data FROM meli_orders ORDER BY order_id').all().map(row=>JSON.parse(String(row.data))[0]);
+ assert.deepEqual(rows.map(row=>[row.revenueCents,row.otherCents]),[[10000,0],[null,null],[null,null]]);
+});
+
 test('descontos de campanha são consultados mesmo sem sinal no pedido',async()=>{const x=setup();await x.authorize();x.setHandler(async url=>{if(url.pathname==='/orders/search')return Response.json({paging:{total:1,offset:0},results:[{...order(),shipping:null}]});if(url.pathname.endsWith('/discounts'))return Response.json({details:[{type:'cashback',items:[{id:'MLB123',quantity:1,amounts:{total:5,seller:0}}]}]});throw Error(url.pathname)});await x.service.sync('owner','a');const saved=JSON.parse(String(x.sqlite.prepare('SELECT data FROM meli_orders').get()?.data))[0];assert.equal(saved.revenueCents,10000);assert.equal(saved.otherCents,0);});
 test('parcela de desconto do vendedor vira despesa sem incluir subsídio',async()=>{
  const x=setup();await x.authorize();
@@ -106,21 +121,34 @@ test('depois do histórico busca somente alterações com sobreposição horári
  assert.equal(result.mode,'incremental');assert.equal(x.sqlite.prepare('SELECT count(*) AS n FROM meli_orders').get()?.n,1);
 });
 test('nova versão do faturamento relê o histórico uma vez e depois volta ao incremental',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=1,logistics_version=2,financials_version=2");const fields:string[]=[];
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=1,logistics_version=2,financials_version=3");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
  const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT gross_sales_version FROM meli_connections').get()?.gross_sales_version,2);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
 });
 test('nova versão logística relê o histórico uma vez e depois volta ao incremental',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=1,financials_version=2");const fields:string[]=[];
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=1,financials_version=3");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
  const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT logistics_version FROM meli_connections').get()?.logistics_version,2);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
 });
+test('correção de descontos relê pedidos recentes uma vez no processamento automático',async()=>{
+ const x=setup();await x.authorize();
+ x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=2");
+ const fields:string[]=[];
+ x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
+ const rebuilt=await x.service.sync('owner','a');
+ assert.equal(rebuilt.mode,'history');
+ assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,3);
+ x.advance(2*3600000);
+ const resumed=await x.service.sync('owner','a');
+ assert.equal(resumed.mode,'incremental');
+ assert.deepEqual(fields,['history','incremental']);
+});
 test('nova versão financeira relê o histórico uma vez e depois volta ao incremental',async()=>{
  const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=1");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
- const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,2);
+ const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,3);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
 });
 test('catálogo retoma da página salva, preserva antigos na falha e isola geração',async()=>{
@@ -230,14 +258,14 @@ test('falha incremental conserva cursor, período e offset até concluir',async(
  assert.equal(x.sqlite.prepare('SELECT sync_cursor FROM meli_connections').get()?.sync_cursor,'2026-09-15T18:00:00.000Z');
 });
 test('janela incremental atrasada inclui sobreposição dentro de 24 horas',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=2");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=3");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  const result=await x.service.sync('owner','a');
  assert.equal(Date.parse(result.toDate)-Date.parse(result.fromDate),86400000);
  assert.equal(result.needsMore,true);
 });
 test('status preserva recuperação pendente depois de concluir janela intermediária',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=2");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=3");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  await x.service.sync('owner','a');assert.equal((await x.service.status('owner')).connections[0].needsMore,true);
  for(let n=0;n<4;n++){const r=await x.service.sync('owner','a');if(!r.needsMore)break;}
