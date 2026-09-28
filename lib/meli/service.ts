@@ -4,6 +4,7 @@ import {randomToken,seal,unseal,pkceChallenge} from './crypto.ts';
 import {authorizationUrl,remoteId,orderSchema,normalizeOrders,type MeliOrder,type ShipmentCost} from './protocol.ts';
 import {hasNoPromotionEvidence,parseSellerDiscounts,type SellerDiscountSummary} from './discounts.ts';
 import {parseCatalogPage} from './catalog.ts';
+import {ADS_METRICS,ADS_PAGE_LIMIT,mergeAdRows,parseAdsPage,parseAdvertiser,pendingAdsDays,type AdSpendRow} from './ads.ts';
 export const CALLBACK_URL='https://central-vendas-lucas.kisashi.chatgpt.site/api/meli/callback';
 export const CATALOG_REFRESH_MS=3600000;
 export class MeliError extends Error {status:number;upstreamStatus:number|null;code:string|null;constructor(status:number,message:string,upstreamStatus:number|null=null,code:string|null=null){super(message);this.status=status;this.upstreamStatus=upstreamStatus;this.code=code;}}
@@ -14,6 +15,7 @@ type Connection={account_id:string;owner_id:string;seller_id:string|null;nicknam
 type Flow={account_id:string;generation:string;app_revision:string;verifier:string};
 type Run={id:string;account_id:string;owner_id:string;generation:string;mode:'history'|'incremental';from_date:string;to_date:string;offset:number;total:number|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
 type CatalogRun={id:string;account_id:string;owner_id:string;generation:string;offset:number;total:number|null;scroll_id:string|null;status:string;lease:string|null;lease_until:number|null;error:string|null;updated_at:number};
+export type AdsState='active'|'no_advertiser'|'forbidden'|'error';
 type Fetcher=(url:string,init?:RequestInit)=>Promise<Response>;
 const shipmentDetailSchema=z.object({id:remoteId,logistic:z.object({type:z.string().min(1).max(80).nullish()}).nullish(),logistic_type:z.string().min(1).max(80).nullish()});
 const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');
@@ -52,15 +54,15 @@ export class MeliService {
   if(!results[1].results.length)throw new MeliError(409,'A configuração mudou. Inicie a conexão novamente.');
   return {url:authorizationUrl({clientId:app.client_id,redirectUri:CALLBACK_URL,pkce:!!app.pkce},state,await pkceChallenge(verifier)),state,browser};
  }
- async remote(path:string,token?:string,body?:URLSearchParams){
+ async remote(path:string,token?:string,body?:URLSearchParams,extraHeaders:Record<string,string>={}){
   // Workers supports manual/follow only. Manual redirects reach the non-2xx rejection below;
   // credentials are never forwarded to the Location target.
   let response:Response;
-  try{response=await this.fetcher('https://api.mercadolibre.com'+path,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Accept:'application/json',...(!path.startsWith('/items/bulk?')?{'x-format-new':'true'}:{}),...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:body.toString()}:{})});}catch{throw new MeliError(502,'O Mercado Livre não respondeu. Tente retomar a atualização.');}
+  try{response=await this.fetcher('https://api.mercadolibre.com'+path,{method:body?'POST':'GET',redirect:'manual',signal:AbortSignal.timeout(12000),headers:{Accept:'application/json',...(!path.startsWith('/items/bulk?')&&!path.startsWith('/advertising/')?{'x-format-new':'true'}:{}),...extraHeaders,...(token?{Authorization:'Bearer '+token}:{}),...(body?{'Content-Type':'application/x-www-form-urlencoded'}:{})},...(body?{body:body.toString()}:{})});}catch{throw new MeliError(502,'O Mercado Livre não respondeu. Tente retomar a atualização.');}
   if(!response.ok){
    const status=response.status;
    // Free-form errors can echo credentials or query values. Log only known error identifiers.
-   const knownCodes=new Set(['bad_request','invalid_limit','invalid_token','invalid_grant','invalid_client','invalid_request','unauthorized','forbidden','not_found','discount_not_found','too_many_requests','internal_server_error']);
+   const knownCodes=new Set(['bad_request','invalid_limit','invalid_token','invalid_grant','invalid_client','invalid_request','unauthorized','forbidden','not_found','discount_not_found','advertiser_not_found','too_many_requests','internal_server_error']);
    let detail:Record<string,unknown>={};
    try{const data=await response.json();if(data&&typeof data==='object'&&!Array.isArray(data))detail=data as Record<string,unknown>;}catch{/* Non-JSON responses are identified by resource and status only. */}
    const code=typeof detail.error==='string'&&knownCodes.has(detail.error)?detail.error:'unrecognized_error';
@@ -254,6 +256,71 @@ export class MeliService {
    }
    throw error instanceof MeliError?error:new MeliError(502,message);
   }
+ }
+ async syncAds(owner:string,id:string,expectedGeneration?:string):Promise<{status:'running'|'complete';state:AdsState;processed:number;total:number}>{
+  const c=await this.connection(owner,id);
+  if(expectedGeneration&&c.generation!==expectedGeneration)throw new MeliError(409,'A conexão mudou.');
+  try{return await accountLease(this.db,owner,id,c.generation,this.now,guard=>this.syncAdsBatch(owner,id,guard));}
+  catch(error){if(error instanceof Error&&error.message==='account_busy')throw new MeliError(409,'Esta conta já está atualizando. Aguarde a conclusão do lote.');throw error;}
+ }
+ private async syncAdsBatch(owner:string,id:string,guard:WriteGuard):Promise<{status:'running'|'complete';state:AdsState;processed:number;total:number}>{
+  const token=await this.accessToken(owner,id),c=await this.connection(owner,id),started=this.now();
+  if(!c.seller_id)throw new MeliError(409,'Autorize o vendedor.');
+  const saveState=async(state:AdsState,advertiserId:string|null,error:string|null)=>{
+   await this.db.prepare(`INSERT INTO meli_ads_state(account_id,owner_id,generation,advertiser_id,state,error,checked_at,updated_at) SELECT ?,?,?,?,?,?,?,? WHERE ${guard.sql} ON CONFLICT(account_id) DO UPDATE SET owner_id=excluded.owner_id,generation=excluded.generation,advertiser_id=excluded.advertiser_id,state=excluded.state,error=excluded.error,checked_at=excluded.checked_at,updated_at=excluded.updated_at`).bind(id,owner,c.generation,advertiserId,state,error,this.now(),this.now(),...guard.values()).run();
+  };
+  let saved=await this.db.prepare('SELECT generation,advertiser_id,state,checked_at FROM meli_ads_state WHERE account_id=? AND owner_id=?').bind(id,owner).first<{generation:string;advertiser_id:string|null;state:AdsState;checked_at:number}>();
+  // Sellers without Mercado Ads, or apps without the advertising scope, are checked again a few times a day.
+  if(!saved||saved.generation!==c.generation||!saved.advertiser_id&&saved.checked_at<this.now()-6*3600000){
+   let advertiserId:string|null=null,state:AdsState='active',message:string|null=null;
+   try{
+    advertiserId=parseAdvertiser(await this.remote('/advertising/advertisers?product_id=PADS',token,undefined,{'Api-Version':'1'}));
+    if(!advertiserId)state='no_advertiser';
+   }catch(error){
+    if(error instanceof MeliError&&error.status===404){state='no_advertiser';}
+    else if(error instanceof MeliError&&error.status===403){state='forbidden';message='A aplicação não tem acesso à Publicidade. Ative a permissão de Publicidade no portal do Mercado Livre e reconecte a conta.';}
+    else if(error instanceof z.ZodError){console.error('meli_ads_parse_error',{resource:'advertisers',issues:error.issues.slice(0,5).map(issue=>({path:issue.path.join('.'),code:issue.code}))});throw new MeliError(502,'O Mercado Livre retornou dados de publicidade incompletos.');}
+    else throw error;
+   }
+   await saveState(state,advertiserId,message);
+   saved={generation:c.generation,advertiser_id:advertiserId,state,checked_at:this.now()};
+  }
+  if(!saved.advertiser_id)return {status:'complete',state:saved.state,processed:0,total:0};
+  const days=await this.db.prepare('SELECT date,fetched_at AS fetchedAt FROM meli_ads_days WHERE account_id=? AND owner_id=?').bind(id,owner).all<{date:string;fetchedAt:number}>();
+  const pending=pendingAdsDays(days.results,this.now());
+  let processed=0;
+  try{
+   for(const date of pending){
+    if(this.now()>started+45000)break;
+    const rows:AdSpendRow[]=[];
+    for(let offset=0,total=Infinity;offset<total;offset+=ADS_PAGE_LIMIT){
+     if(offset>=5000)throw new MeliError(502,'Mais de 5.000 anúncios em publicidade em um dia: leitura interrompida.');
+     const query=new URLSearchParams({limit:String(ADS_PAGE_LIMIT),offset:String(offset),date_from:date,date_to:date,metrics:ADS_METRICS});
+     let page;
+     try{page=parseAdsPage(await this.remote('/advertising/MLB/advertisers/'+saved.advertiser_id+'/product_ads/ads/search?'+query,token,undefined,{'Api-Version':'2'}));}
+     catch(error){
+      if(error instanceof z.ZodError){console.error('meli_ads_parse_error',{resource:'ads_search',issues:error.issues.slice(0,5).map(issue=>({path:issue.path.join('.'),code:issue.code}))});throw new MeliError(502,'O Mercado Livre retornou dados de publicidade incompletos.');}
+      throw error;
+     }
+     rows.push(...page.rows);total=page.total;
+     if(!page.rows.length)break;
+    }
+    const statements=[
+     this.db.prepare(`DELETE FROM meli_ad_spend WHERE account_id=? AND owner_id=? AND date=? AND ${guard.sql}`).bind(id,owner,date,...guard.values()),
+     ...mergeAdRows(rows).map(row=>this.db.prepare(`INSERT INTO meli_ad_spend(id,owner_id,account_id,item_id,date,cost_cents,clicks,prints,attributed_cents,attributed_units,updated_at) SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard.sql}`).bind(id+':'+row.itemId+':'+date,owner,id,row.itemId,date,row.costCents,row.clicks,row.prints,row.attributedCents,row.attributedUnits,this.now(),...guard.values())),
+     this.db.prepare(`INSERT INTO meli_ads_days(account_id,owner_id,date,fetched_at) SELECT ?,?,?,? WHERE ${guard.sql} ON CONFLICT(account_id,date) DO UPDATE SET fetched_at=excluded.fetched_at RETURNING date`).bind(id,owner,date,this.now(),...guard.values()),
+    ];
+    const result=await this.db.batch(statements);
+    if(!result.at(-1)?.results.length)throw new MeliError(409,'A conexão mudou durante a leitura da publicidade.');
+    processed++;
+   }
+  }catch(error){
+   if(error instanceof MeliError&&error.status===403){await saveState('forbidden',null,'A aplicação não tem acesso à Publicidade. Ative a permissão de Publicidade no portal do Mercado Livre e reconecte a conta.');return {status:'complete',state:'forbidden',processed,total:pending.length};}
+   await saveState('error',saved.advertiser_id,error instanceof MeliError?error.message:'Não foi possível ler a publicidade.');
+   throw error;
+  }
+  if(saved.state!=='active')await saveState('active',saved.advertiser_id,null);
+  return {status:processed<pending.length?'running':'complete',state:'active',processed,total:pending.length};
  }
  async processResource(owner:string,id:string,generation:string,resource:string){
   if(!/^\/(orders|shipments)\/\d{1,30}$/.test(resource))throw new MeliError(400,'Recurso inválido.');
