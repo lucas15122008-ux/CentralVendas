@@ -21,8 +21,10 @@ export function normalizeOrders(accountId:string,sellerId:string,input:unknown[]
   const status:Sale['status']=refunded?'refunded':order.status==='paid'?'paid':order.status==='cancelled'?'cancelled':'pending';
   const discountSummary=discountState.get(order.id);
   const discountChecked=discountState.has(order.id);
-  const discountUnknown=discountChecked&&discountSummary===null;
-  const legacyDiscount=!discountChecked&&(order.tags?.some(tag=>/discount|coupon|cashback|partially_refunded/.test(tag))||order.payments?.some(p=>(p.coupon_amount??0)>0)||order.order_items.some(l=>(l.discounts?.length??0)>0||(l.unit_price!=null&&((l.full_unit_price??l.unit_price)>l.unit_price||Math.round((l.gross_price??l.unit_price*l.quantity)*100)>Math.round(l.unit_price*l.quantity*100)))));
+  // Price promotions are already in unit_price; only coupons and cashback can charge the seller apart from the price.
+  const chargedDiscountEvidence=!!(order.tags?.some(tag=>/coupon|cashback/i.test(tag))||order.payments?.some(p=>(p.coupon_amount??0)>0));
+  const discountUnknown=discountChecked&&discountSummary===null&&chargedDiscountEvidence;
+  const legacyDiscount=!discountChecked&&chargedDiscountEvidence;
   const logisticType=order.shipping?.id?shipmentById.get(order.shipping.id)?.logisticType??null:null;
   order.order_items.forEach((line,index)=>{
    const sku=line.item.seller_sku?.trim()||line.item.seller_custom_field?.trim();const issues:string[]=[];
@@ -30,7 +32,7 @@ export function normalizeOrders(accountId:string,sellerId:string,input:unknown[]
    if(refunded)issues.push(refundIssue);
    if(discountUnknown)issues.push('Descontos e subsídios ainda não confirmados pelo Mercado Livre.');
    if(legacyDiscount)issues.push('Descontos e subsídios promocionais a conciliar.');
-   rows.push({id:`${accountId}:${order.id}:${index}`,orderId:order.id,accountId,sku:sku??`Sem SKU · ${line.item.id}/${line.item.variation_id??'0'}`,title:line.item.title,date:businessDate(new Date(order.date_created)),quantity:line.quantity,costQuantity:refunded?null:line.quantity,grossSalesCents:status==='paid'&&line.unit_price!=null?Math.round(line.unit_price*line.quantity*100):null,revenueCents:refunded||discountUnknown||legacyDiscount||line.unit_price==null?null:Math.round(line.unit_price*line.quantity*100),feeCents:line.sale_fee==null?null:Math.round(line.sale_fee*line.quantity*100),shippingCents:null,otherCents:discountUnknown||legacyDiscount?null:discountSummary?.sellerCentsByLine[index]??0,status,source:'mercadolivre',sourceIssues:issues,itemId:line.item.id,variationId:line.item.variation_id??null,logisticType});
+   rows.push({id:`${accountId}:${order.id}:${index}`,orderId:order.id,accountId,sku:sku??`Sem SKU · ${line.item.id}/${line.item.variation_id??'0'}`,title:line.item.title,date:businessDate(new Date(order.date_created)),quantity:line.quantity,costQuantity:refunded?null:line.quantity,grossSalesCents:status==='paid'&&line.unit_price!=null?Math.round(line.unit_price*line.quantity*100):null,revenueCents:refunded||line.unit_price==null?null:Math.round(line.unit_price*line.quantity*100),feeCents:line.sale_fee==null?null:Math.round(line.sale_fee*line.quantity*100),shippingCents:null,otherCents:discountUnknown||legacyDiscount?null:discountSummary?.sellerCentsByLine[index]??0,status,source:'mercadolivre',sourceIssues:issues,itemId:line.item.id,variationId:line.item.variation_id??null,logisticType});
   });
  }
  for(const shipment of shipments){

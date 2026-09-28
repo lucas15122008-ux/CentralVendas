@@ -171,8 +171,8 @@ export class MeliService {
     if(!reset)throw new MeliError(409,'A conexão mudou antes da releitura logística. Tente novamente.');
     await this.db.prepare("UPDATE meli_sync_runs SET status='complete',needs_more=1,lease=NULL,lease_until=NULL,error=NULL WHERE account_id=? AND owner_id=? AND generation=?").bind(id,owner,c.generation).run();
    }
-   if(c.financials_version<4){
-    const reset=await this.db.prepare(`UPDATE meli_connections SET financials_version=4,sync_cursor=NULL WHERE account_id=? AND owner_id=? AND generation=? AND financials_version<4 AND ${guard.sql} RETURNING account_id`).bind(id,owner,c.generation,...guard.values()).first();
+   if(c.financials_version<5){
+    const reset=await this.db.prepare(`UPDATE meli_connections SET financials_version=5,sync_cursor=NULL WHERE account_id=? AND owner_id=? AND generation=? AND financials_version<5 AND ${guard.sql} RETURNING account_id`).bind(id,owner,c.generation,...guard.values()).first();
     if(!reset)throw new MeliError(409,'A conexão mudou antes da releitura financeira. Tente novamente.');
     await this.db.prepare("UPDATE meli_sync_runs SET status='complete',needs_more=1,lease=NULL,lease_until=NULL,error=NULL WHERE account_id=? AND owner_id=? AND generation=?").bind(id,owner,c.generation).run();
    }

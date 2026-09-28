@@ -15,7 +15,7 @@ test('venda aparece antes do enriquecimento e falha deixa trabalho recuperável'
  x.setHandler(async url=>{if(url.pathname==='/orders/100')return Response.json({...order(),shipping:null});
   assert.equal(url.pathname,'/orders/100/discounts');assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_orders').get()?.n,1);
   return fail?new Response(null,{status:503}):Response.json({details:[]});});
- await jobs.processNext();let row=x.sqlite.prepare('SELECT data FROM meli_orders').get();assert.equal(JSON.parse(String(row?.data))[0].revenueCents,null);
+ await jobs.processNext();let row=x.sqlite.prepare('SELECT data FROM meli_orders').get();assert.equal(JSON.parse(String(row?.data))[0].revenueCents,10000);
  assert.equal(x.sqlite.prepare('SELECT attempts FROM meli_jobs').get()?.attempts,1);
  fail=false;x.advance(120000);await jobs.processNext();row=x.sqlite.prepare('SELECT data FROM meli_orders').get();assert.equal(JSON.parse(String(row?.data))[0].revenueCents,10000);
  assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_jobs').get()?.n,0);
