@@ -121,13 +121,13 @@ test('depois do histórico busca somente alterações com sobreposição horári
  assert.equal(result.mode,'incremental');assert.equal(x.sqlite.prepare('SELECT count(*) AS n FROM meli_orders').get()?.n,1);
 });
 test('nova versão do faturamento relê o histórico uma vez e depois volta ao incremental',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=1,logistics_version=2,financials_version=3");const fields:string[]=[];
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=1,logistics_version=2,financials_version=4");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
  const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT gross_sales_version FROM meli_connections').get()?.gross_sales_version,2);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
 });
 test('nova versão logística relê o histórico uma vez e depois volta ao incremental',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=1,financials_version=3");const fields:string[]=[];
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=1,financials_version=4");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
  const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT logistics_version FROM meli_connections').get()?.logistics_version,2);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
@@ -139,7 +139,7 @@ test('correção de descontos relê pedidos recentes uma vez no processamento au
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
  const rebuilt=await x.service.sync('owner','a');
  assert.equal(rebuilt.mode,'history');
- assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,3);
+ assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,4);
  x.advance(2*3600000);
  const resumed=await x.service.sync('owner','a');
  assert.equal(resumed.mode,'incremental');
@@ -148,7 +148,7 @@ test('correção de descontos relê pedidos recentes uma vez no processamento au
 test('nova versão financeira relê o histórico uma vez e depois volta ao incremental',async()=>{
  const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-15T14:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=1");const fields:string[]=[];
  x.setHandler(async url=>{fields.push(url.searchParams.has('order.date_created.from')?'history':'incremental');return Response.json({paging:{total:0,offset:0},results:[]})});
- const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,3);
+ const rebuilt=await x.service.sync('owner','a');assert.equal(rebuilt.mode,'history');assert.equal(x.sqlite.prepare('SELECT financials_version FROM meli_connections').get()?.financials_version,4);
  x.advance(2*3600000);const resumed=await x.service.sync('owner','a');assert.equal(resumed.mode,'incremental');assert.deepEqual(fields,['history','incremental']);
 });
 test('catálogo retoma da página salva, preserva antigos na falha e isola geração',async()=>{
@@ -258,14 +258,14 @@ test('falha incremental conserva cursor, período e offset até concluir',async(
  assert.equal(x.sqlite.prepare('SELECT sync_cursor FROM meli_connections').get()?.sync_cursor,'2026-09-15T18:00:00.000Z');
 });
 test('janela incremental atrasada inclui sobreposição dentro de 24 horas',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=3");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=4");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  const result=await x.service.sync('owner','a');
  assert.equal(Date.parse(result.toDate)-Date.parse(result.fromDate),86400000);
  assert.equal(result.needsMore,true);
 });
 test('status preserva recuperação pendente depois de concluir janela intermediária',async()=>{
- const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=3");
+ const x=setup();await x.authorize();x.sqlite.exec("UPDATE meli_connections SET sync_cursor='2026-09-12T16:00:00.000Z',gross_sales_version=2,logistics_version=2,financials_version=4");
  x.setHandler(async()=>Response.json({paging:{total:0,offset:0},results:[]}));
  await x.service.sync('owner','a');assert.equal((await x.service.status('owner')).connections[0].needsMore,true);
  for(let n=0;n<4;n++){const r=await x.service.sync('owner','a');if(!r.needsMore)break;}

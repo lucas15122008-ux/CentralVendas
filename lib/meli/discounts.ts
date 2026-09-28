@@ -8,6 +8,8 @@ export type SellerDiscountSummary={
 };
 
 const amount=z.number().finite().nonnegative().max(1e10);
+// Campaign promotions already lower the order's unit_price, so only coupons and cashback are charged apart from the price.
+const chargedApartFromPrice=/coupon|cashback/i;
 const discountResponse=z.object({
  details:z.array(z.object({
   type:z.string().min(1).max(80),
@@ -43,7 +45,7 @@ export function parseSellerDiscounts(order:MeliOrder,input:unknown):SellerDiscou
     (item.variation_id==null||(line.item.variation_id??null)===item.variation_id)
    );
    if(matches.length!==1||item.quantity>matches[0].line.quantity)return null;
-   sellerCentsByLine[matches[0].index]+=Math.round(item.amounts.seller*100);
+   if(chargedApartFromPrice.test(detail.type))sellerCentsByLine[matches[0].index]+=Math.round(item.amounts.seller*100);
   }
  }
  return {sellerCentsByLine,hasDiscounts:parsed.data.details.length>0};
