@@ -51,7 +51,7 @@ export function collectPending(input:{sales:SaleResult[];listings:MeliListing[];
   if(sale.costCents!==null&&sale.taxCents===null){
    add({id:pendingId('missing_tax',[sale.accountId,sale.id]),kind:'missing_tax',accountId:sale.accountId,saleId:sale.id,itemId:sale.itemId,variationId:sale.variationId,title,message:'Confirme se o imposto está incluído, é unitário ou percentual.',action:'edit_profile'});
   }
-  if(sale.operation?.channel==='unknown'){
+  if(sale.status==='paid'&&sale.operation?.channel==='unknown'){
    add({id:pendingId('unknown_operation',[sale.accountId,sale.id]),kind:'unknown_operation',accountId:sale.accountId,saleId:sale.id,itemId:sale.itemId,variationId:sale.variationId,title,message:'A modalidade logística não foi confirmada; pode existir despesa Full.',action:sale.itemId?'edit_profile':'correct_sale'});
   }
   if(sale.status==='paid'&&sale.operation?.channel==='full'&&sale.fullExpenseCents===null&&sale.fullClosureState!=='stale'&&Number.isSafeInteger(sale.costQuantity)&&sale.costQuantity!>0){
