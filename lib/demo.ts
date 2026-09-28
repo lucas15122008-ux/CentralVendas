@@ -6,6 +6,7 @@ import type {AdProfileEvent} from './ad-profiles.ts';
 import type {SaleCorrectionEvent} from './sale-corrections.ts';
 import type {MeliListing} from './meli/catalog.ts';
 import type {PendingItem} from './pending.ts';
+import type {AdSpend,AdsAccountState} from './advertising.ts';
 import {collectPending} from './pending.ts';
 import {projectSales} from './sale-projection.ts';
 
@@ -17,8 +18,9 @@ export type Workspace={
  accounts:Account[];imports:ImportBatch[];costs:CostRecord[];sales:Sale[];reconciliationEvents:ReconciliationEvent[];fullClosures:FullClosureSummary[];
  listings:MeliListing[];adProfiles:AdProfileEvent[];saleCorrections:SaleCorrectionEvent[];pending:PendingItem[];rollout:RolloutSummary;
  syncWarnings?:{accountId:string;name:string;status:string}[];
+ adSpend:AdSpend[];adsStatus:AdsAccountState[];
 };
-export const emptyWorkspace:Workspace={accounts:[],imports:[],costs:[],sales:[],reconciliationEvents:[],fullClosures:[],listings:[],adProfiles:[],saleCorrections:[],pending:[],rollout:{state:'pending',sourceStamp:null,activatedAt:null,updatedAt:null}};
+export const emptyWorkspace:Workspace={accounts:[],imports:[],costs:[],sales:[],reconciliationEvents:[],fullClosures:[],listings:[],adProfiles:[],saleCorrections:[],pending:[],rollout:{state:'pending',sourceStamp:null,activatedAt:null,updatedAt:null},adSpend:[],adsStatus:[]};
 
 export function demoWorkspace():Workspace{
  const accounts=[{id:'demo-main',name:'Loja Principal'},{id:'demo-outlet',name:'Loja Outlet'}];
@@ -39,5 +41,12 @@ export function demoWorkspace():Workspace{
  const base=projectSales({rawSales,legacyCosts:[],reconciliationEvents:[],profiles:adProfiles,corrections:[],closures:[],rolloutState:'active'});
  const sales=base.sales.map(sale=>sale.operation?.channel==='full'?{...sale,fullExpense:{cents:500*(sale.costQuantity??0),state:'estimated' as const,month:sale.date.slice(0,7),unitRateCents:500}}:sale);
  const pending=collectPending({sales:sales.map(sale=>calculateSale(sale,[])),listings,migrationIssues:[]});
- return {accounts,costs:[],sales,imports:[],reconciliationEvents:[],fullClosures:[],listings,adProfiles,saleCorrections:[],pending,rollout:{state:'active',sourceStamp:'demo',activatedAt:'2026-09-01T12:00:00Z',updatedAt:'2026-09-01T12:00:00Z'}};
+ // Illustrative ad spend: a few listings with campaigns, one of them spending more than it returns.
+ const adSpend:AdSpend[]=[];
+ for(let day=29;day>=0;day--){const date=periodStart(day+1,today);for(const [index,product] of products.slice(0,4).entries()){
+  const clicks=12+(day*5+index*7)%19,costCents=clicks*(index===3?95:62),attributedCents=index===3?Math.round(costCents*1.4):Math.round(product[2]*100*(1+(day+index)%3));
+  adSpend.push({accountId:'demo-main',itemId:itemId(product[0]),date,costCents,clicks,prints:clicks*38,attributedCents,attributedUnits:Math.max(1,Math.round(attributedCents/(product[2]*100)))});
+ }}
+ const adsStatus:AdsAccountState[]=[{accountId:'demo-main',state:'active',error:null,checkedAt:Date.now(),lastFetchedAt:Date.now()},{accountId:'demo-outlet',state:'no_advertiser',error:null,checkedAt:Date.now(),lastFetchedAt:null}];
+ return {adSpend,adsStatus,accounts,costs:[],sales,imports:[],reconciliationEvents:[],fullClosures:[],listings,adProfiles,saleCorrections:[],pending,rollout:{state:'active',sourceStamp:'demo',activatedAt:'2026-09-01T12:00:00Z',updatedAt:'2026-09-01T12:00:00Z'}};
 }

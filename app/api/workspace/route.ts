@@ -9,6 +9,9 @@ import {saleCorrectionEventFromRow,type SaleCorrectionRow} from '@/lib/sale-corr
 import type {MeliListing} from '@/lib/meli/catalog';
 import {projectSales} from '@/lib/sale-projection';
 import {collectPending} from '@/lib/pending';
+import {periodStart} from '@/lib/dates';
+import {ADS_HISTORY_DAYS} from '@/lib/meli/ads';
+import type {AdSpend,AdsAccountState} from '@/lib/advertising';
 import {activateAdProfileMigration,getAdProfileMigrationStatus,migrationRolloutState,type MigrationIssue,type MigrationRolloutState} from '@/lib/ad-profile-migration';
 
 type ListingRow=Omit<MeliListing,'variationId'|'hasProfile'>&{variationId:string};
@@ -53,6 +56,8 @@ export async function GET(){try{
   db.prepare('SELECT id,account_id AS accountId,sale_id AS saleId,field,revision,action,mode,value,source_value AS sourceValue,source_stamp AS sourceStamp,request_id AS requestId,reason,created_at AS createdAt FROM sale_correction_events WHERE owner_id=? ORDER BY created_at,revision').bind(id),
   db.prepare('SELECT id,account_id AS accountId,item_id AS itemId,variation_id AS variationId,title,status,seller_sku AS sellerSku,updated_at AS updatedAt FROM meli_listings WHERE owner_id=? ORDER BY account_id,title,item_id,variation_id').bind(id),
   db.prepare('SELECT state,source_stamp AS sourceStamp,report,activated_at AS activatedAt,updated_at AS updatedAt FROM ad_profile_rollouts WHERE owner_id=?').bind(id),
+  db.prepare('SELECT s.account_id AS accountId,s.item_id AS itemId,s.date,s.cost_cents AS costCents,s.clicks,s.prints,s.attributed_cents AS attributedCents,s.attributed_units AS attributedUnits FROM meli_ad_spend s JOIN accounts a ON a.id=s.account_id AND a.owner_id=s.owner_id WHERE s.owner_id=? AND s.date>=? ORDER BY s.date').bind(id,periodStart(ADS_HISTORY_DAYS)),
+  db.prepare('SELECT s.account_id AS accountId,s.state,s.error,s.checked_at AS checkedAt,(SELECT MAX(d.fetched_at) FROM meli_ads_days d WHERE d.account_id=s.account_id AND d.owner_id=s.owner_id) AS lastFetchedAt FROM meli_ads_state s JOIN meli_connections c ON c.account_id=s.account_id AND c.owner_id=s.owner_id AND c.generation=s.generation WHERE s.owner_id=?').bind(id),
  ]);
  const costs=results[2].results as unknown as CostRecord[];
  const rawSales=results[3].results.flatMap(row=>{try{return JSON.parse(String((row as {data:string}).data)) as Sale[]}catch{return []}});
@@ -84,6 +89,7 @@ export async function GET(){try{
  const pending=collectPending({sales:projection.results,listings,migrationIssues});
  const fullClosures=[...latest.values()].sort((a,b)=>b.month.localeCompare(a.month)||a.accountId.localeCompare(b.accountId)).map(({allocations,...closure})=>({...closure,allocationCount:allocations.length}));
  const rollout={state:rolloutState,sourceStamp:rolloutSourceStamp,activatedAt:rolloutRow?.activatedAt??null,updatedAt:rolloutRow?.updatedAt??null};
- return Response.json({accounts:results[0].results,imports:results[1].results,costs,syncWarnings:results[4].results,reconciliationEvents,fullClosures,sales:projection.sales,listings,adProfiles,saleCorrections,pending,rollout},{headers:{'Cache-Control':'private, no-store'}});
+ const adSpend=results[12].results as unknown as AdSpend[];const adsStatus=results[13].results as unknown as AdsAccountState[];
+ return Response.json({adSpend,adsStatus,accounts:results[0].results,imports:results[1].results,costs,syncWarnings:results[4].results,reconciliationEvents,fullClosures,sales:projection.sales,listings,adProfiles,saleCorrections,pending,rollout},{headers:{'Cache-Control':'private, no-store'}});
  }catch(error){return errorResponse(error)}
 }

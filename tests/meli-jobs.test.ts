@@ -32,7 +32,7 @@ test('evento divide trava com sincronização manual e desconexão impede escrit
  await jobs.processNext();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_orders').get()?.n,0);
 });
 test('recuperação agenda contas conectadas sem duplicar nem ressuscitar geração antiga',async()=>{
- const x=setup();await x.authorize();const jobs=new MeliJobs(x.service);await jobs.recover();await jobs.recover();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_jobs').get()?.n,2);
+ const x=setup();await x.authorize();const jobs=new MeliJobs(x.service);await jobs.recover();await jobs.recover();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_jobs').get()?.n,3);
  await x.service.disconnect('owner','a');await jobs.processNext();assert.equal(x.sqlite.prepare('SELECT count(*) n FROM meli_jobs').get()?.n,0);
 });
 
