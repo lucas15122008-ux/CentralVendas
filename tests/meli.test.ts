@@ -37,6 +37,15 @@ test('subsídio do Mercado Livre não vira despesa e resposta vazia confirma zer
  assert.equal(normalizeOrders('a','456',[order],[shipping],new Map([['123',subsidized]]))[0].otherCents,0);
  assert.equal(normalizeOrders('a','456',[order],[shipping],new Map([['123',empty]]))[0].revenueCents,20000);
 });
+test('promoção de campanha já reduz o preço e não vira despesa de novo',()=>{
+ const parsed=parseSellerDiscounts(normalizedOrder,{details:[
+  {type:'campaign',items:[{id:'MLB123',quantity:2,amounts:{total:40,seller:30}}]},
+  {type:'coupon',items:[{id:'MLB123',quantity:2,amounts:{total:20,seller:5}}]},
+ ]});
+ assert.ok(parsed);assert.deepEqual(parsed.sellerCentsByLine,[500]);assert.equal(parsed.hasDiscounts,true);
+ const [sale]=normalizeOrders('a','456',[order],[shipping],new Map([['123',parsed]]));
+ assert.equal(sale.revenueCents,20000);assert.equal(sale.otherCents,500);
+});
 test('desconto malformado ou alvo ambíguo permanece desconhecido',()=>{
  assert.equal(parseSellerDiscounts(normalizedOrder,{details:[{type:'coupon',items:[{id:'MLB123',quantity:2,amounts:{total:5,seller:6}}]}]}),null);
  const ambiguous={...order,order_items:[
