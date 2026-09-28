@@ -55,9 +55,10 @@ export function calculateSale(sale:Sale,costs:CostRecord[]):SaleResult {
     :profile.tax.mode==='unit'?sale.costQuantity===null?null:Math.round(profile.tax.valueTenThousandths*sale.costQuantity/100)
     :sale.revenueCents===null?null:Math.round(sale.revenueCents*profile.tax.rateBasisPoints/10_000)
    :cost&&cost.taxValue!==null?(cost.taxTreatment==='additional'?(cost.taxType==='percent'?(sale.revenueCents===null?null:Math.round(sale.revenueCents*cost.taxValue/100)):(sale.costQuantity===null?null:Math.round(Math.round(cost.taxValue*10000)*sale.costQuantity/100))):0):null;
-  const operationUnknown=sale.operation?.channel==='unknown';
+  // Full expenses only apply to paid sales, so a refund's logistics never blocks its result.
+  const operationUnknown=sale.status==='paid'&&sale.operation?.channel==='unknown';
   if(operationUnknown)reasons.push('Modalidade logística não confirmada');
-  const fullExpenseCents=projectedFull??(sale.operation?.channel==='full'||operationUnknown?null:0);
+  const fullExpenseCents=projectedFull??(sale.status==='paid'&&(sale.operation?.channel==='full'||operationUnknown)?null:0);
   if(fullExpenseCents===null&&!operationUnknown)reasons.push('Despesa Full ainda sem estimativa');
   const contributionCents=reasons.length?null:(sale.revenueCents??0)-(sale.feeCents??0)-(sale.shippingCents??0)-(sale.otherCents??0)-(costCents??0)-(taxCents??0)-fullExpenseCents!;
   return {...sale,cost,costCents,taxCents,fullExpenseCents,contributionCents,margin:contributionCents!==null&&sale.revenueCents!==null&&sale.revenueCents>0?contributionCents/sale.revenueCents*100:null,reasons,resultState:resultState(sale,reasons)};

@@ -1,5 +1,7 @@
 import type {FinancialField,Sale} from './finance.ts';
 
+export const refundIssue='Cancelamento ou reembolso: receita e recuperação do estoque a conciliar.';
+
 export type CorrectableField='revenueCents'|'feeCents'|'shippingCents'|'otherCents'|'costQuantity';
 
 export type SaleCorrectionEvent={
@@ -60,5 +62,7 @@ export function applySaleCorrections(sale:Sale,events:SaleCorrectionEvent[]):Sal
   result=withValue(result,event.field,event.value,'manual_override');
   if(result.correctionState!=='stale')result.correctionState='corrected';
  }
+ // Once revenue and stock recovery are informed, the refund no longer needs reconciliation.
+ if(result.revenueCents!==null&&result.costQuantity!==null&&result.sourceIssues?.includes(refundIssue))result.sourceIssues=result.sourceIssues.filter(issue=>issue!==refundIssue);
  return result;
 }

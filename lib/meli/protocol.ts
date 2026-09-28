@@ -3,6 +3,7 @@ import {businessDate} from '../dates.ts';
 import type {Sale} from '../finance.ts';
 import {allocateCents} from '../allocation.ts';
 import type {SellerDiscountSummary} from './discounts.ts';
+import {refundIssue} from '../sale-corrections.ts';
 export {allocateCents} from '../allocation.ts';
 export const remoteId=z.union([z.string().regex(/^\d+$/),z.number().int().nonnegative().safe()]).transform(String);
 const amount=z.number().finite().nonnegative().max(1e10);
@@ -26,7 +27,7 @@ export function normalizeOrders(accountId:string,sellerId:string,input:unknown[]
   order.order_items.forEach((line,index)=>{
    const sku=line.item.seller_sku?.trim()||line.item.seller_custom_field?.trim();const issues:string[]=[];
    if(!sku)issues.push('Anúncio sem SKU: informe o código no Mercado Livre e atualize as vendas.');
-   if(refunded)issues.push('Cancelamento ou reembolso: receita e recuperação do estoque a conciliar.');
+   if(refunded)issues.push(refundIssue);
    if(discountUnknown)issues.push('Descontos e subsídios ainda não confirmados pelo Mercado Livre.');
    if(legacyDiscount)issues.push('Descontos e subsídios promocionais a conciliar.');
    rows.push({id:`${accountId}:${order.id}:${index}`,orderId:order.id,accountId,sku:sku??`Sem SKU · ${line.item.id}/${line.item.variation_id??'0'}`,title:line.item.title,date:businessDate(new Date(order.date_created)),quantity:line.quantity,costQuantity:refunded?null:line.quantity,grossSalesCents:status==='paid'&&line.unit_price!=null?Math.round(line.unit_price*line.quantity*100):null,revenueCents:refunded||discountUnknown||legacyDiscount||line.unit_price==null?null:Math.round(line.unit_price*line.quantity*100),feeCents:line.sale_fee==null?null:Math.round(line.sale_fee*line.quantity*100),shippingCents:null,otherCents:discountUnknown||legacyDiscount?null:discountSummary?.sellerCentsByLine[index]??0,status,source:'mercadolivre',sourceIssues:issues,itemId:line.item.id,variationId:line.item.variation_id??null,logisticType});
