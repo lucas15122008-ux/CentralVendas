@@ -20,8 +20,8 @@ test('reembolso não presume recuperação do estoque nem receita líquida',()=>
 test('pedido sem SKU não é associado por título',()=>{const [s]=normalizeOrders('a','456',[{...order,order_items:[{...order.order_items[0],item:{id:'MLB123',title:'Produto'}}]}],[shipping]);assert.ok(s.sourceIssues?.some(x=>x.includes('SKU')));assert.notEqual(s.sku,'00001');});
 test('cancelamento com frete permanece visível como conciliação pendente',()=>{const [s]=normalizeOrders('a','456',[{...order,status:'cancelled'}],[shipping]);assert.equal(s.status,'refunded');assert.equal(s.revenueCents,null);assert.equal(s.costQuantity,null);assert.equal(s.shippingCents,1001);});
 test('status de reembolso parcial não depende da presença dos pagamentos',()=>{const [s]=normalizeOrders('a','456',[{...order,status:'partially_refunded',payments:undefined}],[shipping]);assert.equal(s.status,'refunded');assert.equal(s.revenueCents,null);});
-test('cupom mantém o valor vendido mesmo com resultado pendente',()=>{const [s]=normalizeOrders('a','456',[{...order,payments:[{status:'approved',coupon_amount:10}]}],[shipping]);assert.equal(s.grossSalesCents,20000);assert.equal(s.revenueCents,null);});
-test('desconto oficial mantém o valor vendido mesmo com resultado pendente',()=>{const [s]=normalizeOrders('a','456',[{...order,tags:['paid'],order_items:[{...order.order_items[0],discounts:[{amounts:{full:10,seller:5}}],gross_price:220}]}],[shipping]);assert.equal(s.grossSalesCents,20000);assert.equal(s.revenueCents,null);});
+test('cupom mantém a receita e deixa só a parte do vendedor pendente',()=>{const [s]=normalizeOrders('a','456',[{...order,payments:[{status:'approved',coupon_amount:10}]}],[shipping]);assert.equal(s.grossSalesCents,20000);assert.equal(s.revenueCents,20000);assert.equal(s.otherCents,null);});
+test('promoção de preço já está no preço e não deixa a venda pendente',()=>{const [s]=normalizeOrders('a','456',[{...order,tags:['paid'],order_items:[{...order.order_items[0],discounts:[{amounts:{full:10,seller:5}}],gross_price:220}]}],[shipping]);assert.equal(s.grossSalesCents,20000);assert.equal(s.revenueCents,20000);assert.equal(s.otherCents,0);assert.deepEqual(s.sourceIssues,[]);});
 test('cancelamento não entra no faturamento informado',()=>{const [s]=normalizeOrders('a','456',[{...order,status:'cancelled'}],[shipping]);assert.equal(s.grossSalesCents,null);});
 test('preço ausente preserva a venda com receita e rateio pendentes',()=>{const [s]=normalizeOrders('a','456',[{...order,order_items:[{...order.order_items[0],unit_price:undefined}]}],[shipping]);assert.equal(s.revenueCents,null);assert.equal(s.shippingCents,null);});
 test('desconto separa somente a parcela paga pelo vendedor',()=>{
@@ -54,8 +54,10 @@ test('desconto malformado ou alvo ambíguo permanece desconhecido',()=>{
  ]};
  const parsed=parseSellerDiscounts(orderSchema.parse(ambiguous),{details:[{type:'coupon',items:[{id:'MLB123',quantity:1,amounts:{total:5,seller:2}}]}]});
  assert.equal(parsed,null);
- const [sale]=normalizeOrders('a','456',[order],[shipping],new Map([['123',null]]));
- assert.equal(sale.revenueCents,null);assert.equal(sale.otherCents,null);
+ const [sale]=normalizeOrders('a','456',[{...order,payments:[{status:'approved',coupon_amount:10}]}],[shipping],new Map([['123',null]]));
+ assert.equal(sale.revenueCents,20000);assert.equal(sale.otherCents,null);
+ const [plain]=normalizeOrders('a','456',[order],[shipping],new Map([['123',null]]));
+ assert.equal(plain.otherCents,0);
 });
 test('catálogo cria alvo sem variação e um alvo por variação',()=>{
  const search={seller_id:456,paging:{total:2,offset:0,limit:2},results:['MLB1','MLB2']};
